@@ -17,7 +17,8 @@ from beowulf.dgm.utils import network_to_df
 ############################################
 # Setting simulation parameters
 ############################################
-n_mc = 500
+# n_mc = 500
+n_mc = 2
 
 exposure = "statin"
 outcome = "cvd"
