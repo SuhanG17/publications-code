@@ -38,16 +38,17 @@ class AbstractML:
         # self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
 
-    def fit(self, df, model_string, target):
+    def fit(self, df, model_string, target, cat_vars=[], cont_vars=[], cat_unique_levels={}):
         # instantiate model
-        self.model = self._build_model(df, model_string, target).to(self.device)
+        self.model = self._build_model(df, model_string, target, cat_vars, cont_vars, cat_unique_levels).to(self.device)
         self.optimizer = self._optimizer()
 
         # target is exposure for nuisance models, outcome for outcome model
         fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
 
         if self.n_splits > 1: # Kfold cross validation is used
-            splits, dset = self._data_preprocess(df, model_string, target, fit=True)
+            splits, dset = self._data_preprocess(df, model_string, target, fit=True,
+                                                 cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
             for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dset)))):
                 print('Fold {}'.format(fold + 1))
                 self.train_loader, self.valid_loader = get_kfold_dataloaders(dset, train_idx, val_idx, 
@@ -63,6 +64,13 @@ class AbstractML:
                     fold_record['val_loss'].append(loss_valid)
                     fold_record['train_acc'].append(metrics_train)
                     fold_record['val_acc'].append(metrics_valid)
+
+                    # update best loss
+                    if loss_valid < self.best_loss:
+                        self._save_model()
+                        self.best_loss = loss_valid
+                        self.best_model = self.model
+                        print('Best model updated')
             
             avg_train_loss = np.mean(fold_record['train_loss'])
             avg_val_loss = np.mean(fold_record['val_loss'])
@@ -72,8 +80,8 @@ class AbstractML:
             print(f'Performance of {self.n_splits} fold cross validation')
             print(f'Average Training Loss: {avg_train_loss:.4f} \t Average Val Loss: {avg_val_loss:.4f} \t Average Training Acc: {avg_train_acc:.3f} \t Average Test Acc: {avg_val_acc:.3f}')  
         else:
-            self.train_loader, self.valid_loader, self.test_loader = self._data_preprocess(df, model_string, target, 
-                                                                                           fit=True)
+            self.train_loader, self.valid_loader, self.test_loader = self._data_preprocess(df, model_string, target, fit=True,
+                                                                                           cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
             for epoch in range(self.epochs):
                 print(f'============================= Epoch {epoch + 1}: Training =============================')
                 loss_train, metrics_train = self.train_epoch(epoch)
@@ -87,19 +95,21 @@ class AbstractML:
                     self._save_model()
                     self.best_loss = loss_valid
                     self.best_model = self.model
+                    print('Best model updated')
             
         return self.best_model
 
-    def predict(self, df, model_string, target):
+    def predict(self, df, model_string, target, cat_vars=[], cont_vars=[], cat_unique_levels={}):
         # instantiate model
-        self.model = self._build_model(df, model_string, target).to(self.device)
+        self.model = self._build_model(df, model_string, target, cat_vars, cont_vars, cat_unique_levels).to(self.device)
 
         if self.predict_all:
-            dset = DfDataset(df, model_string, target=target, fit=False)
+            dset = DfDataset(df, model_string, target=target, fit=False, 
+                             cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
             self.test_loader = get_predict_loader(dset, self.batch_size)
         else:
-            _, _, self.test_loader = self._data_preprocess(df, model_string, target, 
-                                                           fit=False)
+            _, _, self.test_loader = self._data_preprocess(df, model_string, target, fit=False,
+                                                           cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
         self._load_model()
         pred = self.test_epoch(epoch=0, return_pred=True) # pred should probabilities, one for binary
         return pred
@@ -215,8 +225,10 @@ class AbstractML:
     def _build_model(self):
         pass 
 
-    def _data_preprocess(self, df, model_string, target=None, fit=True):
-        dset = DfDataset(df, model_string, target=target, fit=fit)
+    def _data_preprocess(self, df, model_string, target=None, fit=True,
+                         cat_vars=[], cont_vars=[], cat_unique_levels={}):
+        dset = DfDataset(df, model_string, target=target, fit=fit,
+                         cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
 
         if self.n_splits > 1: # Kfold cross validation is used
             return get_kfold_split(n_splits=self.n_splits, shuffle=self.shuffle), dset
@@ -233,7 +245,7 @@ class AbstractML:
         # return optim.Adam(self.model.parameters(), lr=0.001)
 
     def _loss_fn(self):
-        return nn.BCEWithLogitsLoss() # no need for sigmoid, require 2 output for binary classfication
+        return nn.BCEWithLogitsLoss() # no need for sigmoid, require 1 output for binary classfication
         # return nn.CrossEntropyLoss() # no need for softmax, require 2 output for binary classification
 
     def _metrics(self, outputs, labels):
@@ -253,13 +265,16 @@ class AbstractML:
 
 ######################## define dataset ########################
 class DfDataset(Dataset):
-    def __init__(self, df, model, target=None, fit=True):
+    def __init__(self, df, model, target=None, fit=True, cat_vars=[], cont_vars=[], cat_unique_levels={}):
         ''' Retrieve train,label and pred data from Dataframe directly
         Args:  
             df: pd.DataFrame, data, i.e., df_restricted
             model: str, model formula, i.e., _gi_model
             target: str, target variable, i.e., exposure/outcome
             fit: bool, whether the dataset is for fitting or prediction
+            cat_vars: list, categorical variables in df
+            cont_vars: list, continuous variables in df
+            cat_unique_levels: dict, number of unique levels for each categorical variable of df
 
         if fit is set to true, df should be data_to_fit; else, df should be data_to_predict
         '''
@@ -267,8 +282,9 @@ class DfDataset(Dataset):
         self.model = model
         self.target = target
         self.fit = fit
+        self.cat_vars, self.cont_vars, self.cat_unique_levels = cat_vars, cont_vars, cat_unique_levels
 
-        self.x_cat, self.x_cont, self.cat_unique_levels = self._split_cat_cont() 
+        self.x_cat, self.x_cont, self.model_cat_unique_levels = self._split_cat_cont() 
         if self.fit:
             self.y = self._get_labels()
         else:
@@ -279,21 +295,19 @@ class DfDataset(Dataset):
         # get variables from model string
         vars = self.model.split(' + ')
 
-        cat_vars = []
-        cont_vars = []
-        cat_unique_levels = {}
+        model_cat_vars = []
+        model_cont_vars = []
+        model_cat_unique_levels = {}
         for var in vars:
-            if var in self.df.columns:
-                if self.df[var].dtype == 'int64':
-                    
-                    cat_vars.append(var)
-                    if len(pd.unique(self.df[var])) == 2:
-                        cat_unique_levels[var] = len(pd.unique(self.df[var])) # record number of levels
-                    else:
-                        cat_unique_levels[var] = self.df['A'].max() + 1 # record number of levels for 'A_30', temporary strategy
-                else:
-                    cont_vars.append(var)
-        return self.df[cat_vars].to_numpy(), self.df[cont_vars].to_numpy(), cat_unique_levels
+            if var in self.cat_vars:
+                model_cat_vars.append(var)
+                model_cat_unique_levels[var] = self.cat_unique_levels[var]
+            elif var in self.cont_vars:
+                model_cont_vars.append(var)
+            else:
+                raise ValueError('Variable in model string not in cat_vars or cont_vars')
+        
+        return self.df[model_cat_vars].to_numpy(), self.df[model_cont_vars].to_numpy(), model_cat_unique_levels 
     
     def _get_labels(self):
         return np.asarray(self.df[self.target])[:, np.newaxis] #[num_samples, ] -> [num_samples, 1] 
@@ -304,6 +318,62 @@ class DfDataset(Dataset):
 
     def __len__(self):
         return self.y.shape[0]
+
+# dset = DfDataset(df_restricted, _gi_model, target=target, fit=False, 
+#                  cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
+# class DfDataset(Dataset):
+#     def __init__(self, df, model, target=None, fit=True):
+#         ''' Retrieve train,label and pred data from Dataframe directly
+#         Args:  
+#             df: pd.DataFrame, data, i.e., df_restricted
+#             model: str, model formula, i.e., _gi_model
+#             target: str, target variable, i.e., exposure/outcome
+#             fit: bool, whether the dataset is for fitting or prediction
+
+#         if fit is set to true, df should be data_to_fit; else, df should be data_to_predict
+#         '''
+#         self.df = df
+#         self.model = model
+#         self.target = target
+#         self.fit = fit
+
+#         self.x_cat, self.x_cont, self.cat_unique_levels = self._split_cat_cont() 
+#         if self.fit:
+#             self.y = self._get_labels()
+#         else:
+#             self.y = np.empty((self.x_cat.shape[0], 1))
+#             self.y.fill(-1) # create dummy target for pdata
+    
+#     def _split_cat_cont(self):
+#         # get variables from model string
+#         vars = self.model.split(' + ')
+
+#         cat_vars = []
+#         cont_vars = []
+#         cat_unique_levels = {}
+#         for var in vars:
+#             if var in self.df.columns:
+#                 if self.df[var].dtype == 'int64':
+                    
+#                     cat_vars.append(var)
+#                     if len(pd.unique(self.df[var])) == 2:
+#                         cat_unique_levels[var] = len(pd.unique(self.df[var])) # record number of levels
+#                     else:
+#                         cat_unique_levels[var] = self.df['A'].max() + 1 # record number of levels for 'A_30', temporary strategy
+#                 else:
+#                     cont_vars.append(var)
+#         return self.df[cat_vars].to_numpy(), self.df[cont_vars].to_numpy(), cat_unique_levels
+    
+#     def _get_labels(self):
+#         return np.asarray(self.df[self.target])[:, np.newaxis] #[num_samples, ] -> [num_samples, 1] 
+    
+#     def __getitem__(self, idx):
+#         return torch.from_numpy(self.x_cat[idx]).int(), torch.from_numpy(self.x_cont[idx]).float(), torch.from_numpy(self.y[idx]).float()
+#         # shape: [num_cat_vars], [num_cont_vars], [1]
+
+#     def __len__(self):
+#         return self.y.shape[0]
 
 # class CatContDataset(Dataset):
 #     def __init__(self, xdata, ydata=None, cat_vars_index=None, cont_vars_index=None):
@@ -354,9 +424,9 @@ def get_predict_loader(dataset, batch_size=16):
 
 ######################## define models ########################
 class SimpleModel(nn.Module):
-    def __init__(self, cat_unique_levels, n_cont):
+    def __init__(self, model_cat_unique_levels, n_cont):
         super().__init__()
-        self.embedding_layers, self.n_emb, self.n_cont = self._get_embedding_layers(cat_unique_levels, n_cont)
+        self.embedding_layers, self.n_emb, self.n_cont = self._get_embedding_layers(model_cat_unique_levels, n_cont)
         self.lin1 = nn.Linear(self.n_emb + self.n_cont, 16)
         self.lin2 = nn.Linear(16, 32)
         self.lin3 = nn.Linear(32, 1) # use BCEloss, so output 1
@@ -366,10 +436,10 @@ class SimpleModel(nn.Module):
         self.emb_drop = nn.Dropout(0.6)
         self.drops = nn.Dropout(0.3)
 
-    def _get_embedding_layers(self, cat_unique_levels, n_cont):
+    def _get_embedding_layers(self, model_cat_unique_levels, n_cont):
         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
         # decide embedding sizes
-        embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in cat_unique_levels.items()]
+        embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
         embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
         n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
@@ -391,6 +461,7 @@ class SimpleModel(nn.Module):
         x = self.lin3(x)
         return x
 
+
 ######################## ml training ########################
 class MLP(AbstractML):
     def __init__(self, split_ratio, batch_size, shuffle, n_splits, predict_all,
@@ -398,12 +469,14 @@ class MLP(AbstractML):
         super().__init__(split_ratio, batch_size, shuffle, n_splits, predict_all,
                          epochs, print_every, device, save_path)
 
-    def _build_model(self, df, model_string, target):
-        dset = DfDataset(df, model_string, target=target, fit=False)
-        cat_unique_levels = dset.cat_unique_levels
+    def _build_model(self, df, model_string, target, 
+                     cat_vars=[], cont_vars=[], cat_unique_levels={}):
+        dset = DfDataset(df, model_string, target=target, fit=False, 
+                         cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+        model_cat_unique_levels = dset.model_cat_unique_levels
         n_cont = dset.x_cont.shape[1]
 
-        return SimpleModel(cat_unique_levels, n_cont) 
+        return SimpleModel(model_cat_unique_levels, n_cont) 
 
 # params
 _gi_model = "L + A_30 + R_1 + R_2 + R_3"
@@ -417,8 +490,8 @@ mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_sp
 mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
                   epochs=10, print_every=5, device='cpu', save_path='./tmp.pth')
 
-best_model = mlp_learner.fit(df_restricted, _gi_model, target)
-pred = mlp_learner.predict(df_restricted, _gi_model, target)
+best_model = mlp_learner.fit(df_restricted, _gi_model, target, cat_vars, cont_vars, cat_unique_levels)
+pred = mlp_learner.predict(df_restricted, _gi_model, target, cat_vars, cont_vars, cat_unique_levels)
 len(pred)
 #16*31+4
 
@@ -426,9 +499,13 @@ len(pred)
 from beowulf import load_uniform_statin
 from beowulf.dgm import statin_dgm
 
-G = load_uniform_statin()
+# SG modified
+# G = load_uniform_statin()
+G, cat_vars, cont_vars, cat_unique_levels = load_uniform_statin(n=500, return_cat_cont_split=True)
 # Simulation single instance of exposure and outcome
-H = statin_dgm(network=G)
+H, cat_vars, cont_vars, cat_unique_levels = statin_dgm(network=G, restricted=False,
+                                                       update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
 
 import numpy as np
 import pandas as pd
@@ -543,6 +620,7 @@ for v in [var for var in list(df.columns) if var not in [oid, outcome]]:  # All 
                                                  measure=summary_measure)
         if summary_measure in handle_isolates:                            # ... set isolates from nan to 0
             df[v+'_'+summary_measure] = df[v+'_'+summary_measure].fillna(0)
+        cont_vars.append(v+'_'+summary_measure) #SG modified
 
 # Creating summary measure mappings for non-parametric exposure_map_model()
 exp_map_cols = exp_map_individual(network=network,               # Generate columns of indicator
@@ -552,6 +630,18 @@ _nonparam_cols_ = list(exp_map_cols.columns)                # Save column list f
 df = pd.merge(df,                                                # Merge these columns into main data
               exp_map_cols.fillna(0),                            # set nan to 0 to keep same dimension across i
               how='left', left_index=True, right_index=True)     # Merge on index to left
+
+#SG modified
+if exposure in cat_vars:
+    # print('categorical')
+    cat_vars.extend(_nonparam_cols_) # add all mappings to categorical variables
+    for col in _nonparam_cols_:
+        cat_unique_levels[col] = pd.unique(df[col].astype('int')).max() + 1
+elif exposure in cont_vars:
+    # print('continuous')
+    cont_vars.extend(_nonparam_cols_)
+else:
+    raise ValueError('exposure is neither assigned to categorical or continuous variables')
 
 # Calculating degree for all the nodes
 if nx.is_directed(network):                                         # For directed networks...
@@ -563,6 +653,10 @@ else:                                                               # For undire
 df = pd.merge(df,                                              # Merge main data
                     degree_data,                                     # ...with degree data
                     how='left', left_index=True, right_index=True)   # ...based on index
+
+#SG modified
+cat_vars.append('degree')
+cat_unique_levels['degree'] = pd.unique(df['degree'].astype('int')).max() + 1
 
 # Apply degree restriction to data
 if degree_restrict is not None:                                     # If restriction provided,
