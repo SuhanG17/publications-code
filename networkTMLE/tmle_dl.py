@@ -12,8 +12,9 @@ from scipy.stats.kde import gaussian_kde
 
 from tmle_utils import (network_to_df, fast_exp_map, exp_map_individual, tmle_unit_bounds, tmle_unit_unbound,
                         probability_to_odds, odds_to_probability, bounding,
-                        outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner,
-                        targeting_step, create_threshold, create_categorical)
+                        outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner, exposure_deep_learner, outcome_deep_learner,
+                        targeting_step, create_threshold, create_categorical,
+                        get_model_cat_cont_split_patsy_matrix, append_target_to_df)
 
 
 class NetworkTMLE:
@@ -132,7 +133,12 @@ class NetworkTMLE:
     Data. In Targeted Learning in Data Science (pp. 373-396). Springer.
     """
     def __init__(self, network, exposure, outcome, degree_restrict=None, alpha=0.05,
-                 continuous_bound=0.0005, verbose=False):
+                 continuous_bound=0.0005, verbose=False,
+                 cat_vars=[], cont_vars=[], cat_unique_levels={},
+                 use_deep_learner_A_i=False, use_deep_learner_A_i_s=False, use_deep_learner_outcome=False):
+        # initiate cat_vars, cont_vars and cat_unique_levels (SG_modified)
+        self.cat_vars, self.cont_vars, self.cat_unique_levels = cat_vars, cont_vars, cat_unique_levels
+
         # Checking for some common problems that should provide errors
         if not all([isinstance(x, int) for x in list(network.nodes())]):   # Check if all node IDs are integers
             raise ValueError("NetworkTMLE requires that "                  # ... possibly not needed?
@@ -199,6 +205,7 @@ class NetworkTMLE:
                                                          measure=summary_measure)
                 if summary_measure in handle_isolates:                            # ... set isolates from nan to 0
                     df[v+'_'+summary_measure] = df[v+'_'+summary_measure].fillna(0)
+                self.cont_vars.append(v+'_'+summary_measure)                           # ... add to continuous variables (SG_modified)
 
         # Creating summary measure mappings for non-parametric exposure_map_model()
         exp_map_cols = exp_map_individual(network=network,               # Generate columns of indicator
@@ -208,6 +215,18 @@ class NetworkTMLE:
         df = pd.merge(df,                                                # Merge these columns into main data
                       exp_map_cols.fillna(0),                            # set nan to 0 to keep same dimension across i
                       how='left', left_index=True, right_index=True)     # Merge on index to left
+
+        # Assign all mappings variables  (SG_modified)
+        if exposure in cat_vars:
+            # print('categorical')
+            self.cat_vars.extend(self._nonparam_cols_) # add all mappings to categorical variables
+            for col in self._nonparam_cols_:
+                self.cat_unique_levels[col] = pd.unique(df[col].astype('int')).max() + 1
+        elif exposure in cont_vars:
+            # print('continuous')
+           self.cont_vars.extend(self._nonparam_cols_)
+        else:
+            raise ValueError('exposure is neither assigned to categorical or continuous variables')
 
         # Calculating degree for all the nodes
         if nx.is_directed(network):                                         # For directed networks...
@@ -219,6 +238,10 @@ class NetworkTMLE:
         self.df = pd.merge(df,                                              # Merge main data
                            degree_data,                                     # ...with degree data
                            how='left', left_index=True, right_index=True)   # ...based on index
+        
+        # Assign degree variables (SG_modified)
+        self.cat_vars.append('degree')
+        self.cat_unique_levels['degree'] = pd.unique(self.df['degree'].astype('int')).max() + 1
 
         # Apply degree restriction to data
         if degree_restrict is not None:                                     # If restriction provided,
@@ -261,6 +284,10 @@ class NetworkTMLE:
         # Storage items for summary formatting
         self._specified_p_, self._specified_bound_, self._resamples_ = None, None, None
         self._verbose_ = verbose
+
+        # Use deep learner for exposure or outcome nuisance model (SG_modified)
+        self.use_deep_learner_A_i, self.use_deep_learner_A_i_s = use_deep_learner_A_i, use_deep_learner_A_i_s
+        self.use_deep_learner_outcome = use_deep_learner_outcome
 
     def exposure_model(self, model, custom_model=None, custom_model_sim=None):
         """Exposure model for individual i.  Estimates Pr(A=a|W, W_map) using a logistic regression model.
@@ -409,18 +436,24 @@ class NetworkTMLE:
 
         # Logic if custom_model is provided
         else:
-            # Extract data using the model
-            data = patsy.dmatrix(model + ' - 1',                      # Specified model WITHOUT an intercept
-                                 self.df_restricted)                  # ... using the degree restricted data
+            if self.use_deep_learner_outcome:
+                xdata = patsy.dmatrix(model + ' - 1', self.df_restricted, return_type="dataframe")
+                self._q_custom_, self._Qinit_ = outcome_deep_learner(custom_model, 
+                                                                     xdata, self.df_restricted[self.outcome], self.outcome,
+                                                                     self.cat_vars, self.cont_vars, self.cat_unique_levels)
+            else:
+                # Extract data using the model
+                data = patsy.dmatrix(model + ' - 1',                      # Specified model WITHOUT an intercept
+                                    self.df_restricted)                  # ... using the degree restricted data
 
-            # Estimating custom_model
-            self._q_custom_ = outcome_learner_fitting(ml_model=custom_model,       # User-specified model
-                                                      xdata=np.asarray(data),      # Extracted X data
-                                                      ydata=np.asarray(self.df_restricted[self.outcome]))
+                # Estimating custom_model
+                self._q_custom_ = outcome_learner_fitting(ml_model=custom_model,       # User-specified model
+                                                        xdata=np.asarray(data),      # Extracted X data
+                                                        ydata=np.asarray(self.df_restricted[self.outcome]))
 
-            # Generating predictions
-            self._Qinit_ = outcome_learner_predict(ml_model_fit=self._q_custom_,   # Fit custom_model
-                                                   xdata=np.asarray(data))         # Observed X data
+                # Generating predictions
+                self._Qinit_ = outcome_learner_predict(ml_model_fit=self._q_custom_,   # Fit custom_model
+                                                    xdata=np.asarray(data))         # Observed X data
 
         # Ensures all predicted values are bounded
         if self._continuous_outcome:
@@ -508,9 +541,15 @@ class NetworkTMLE:
         if self._q_custom_ is None:                                            # If given a parametric default model
             y_star = self._outcome_model.predict(pooled_data_restricted)       # ... predict using statsmodels syntax
         else:  # Custom input model by user
-            d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted)  # ... extract data via patsy
-            y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,     # ... predict using custom function
-                                             xdata=np.asarray(d))              # ... for the extracted data
+            if self.use_deep_learner_outcome:
+                xdata = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted, return_type="dataframe")
+                y_star = outcome_deep_learner(self._q_custom_, xdata, None, None, 
+                                              self.cat_vars, self.cont_vars, self.cat_unique_levels,
+                                              predict_with_best=True, custom_path=None)
+            else:
+                d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted)  # ... extract data via patsy
+                y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,     # ... predict using custom function
+                                                xdata=np.asarray(d))              # ... for the extracted data
 
         # Ensure all predicted values are bounded properly for continuous
         if self._continuous_outcome:
@@ -977,12 +1016,19 @@ class NetworkTMLE:
                 self._treatment_models.append(treat_i_model)                  # save model to list (so can be extracted)
 
         else:                                                                 # Otherwise use the custom_model
-            xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit)       # Extract via patsy the data
-            pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict)   # Extract via patsy the data
-            pred = exposure_machine_learner(ml_model=self._gi_custom_,        # Custom model application and preds
-                                            xdata=np.asarray(xdata),          # ... with data to fit
-                                            ydata=np.asarray(data_to_fit[self.exposure]),
-                                            pdata=np.asarray(pdata))          # ... and data to predict
+            if self.use_deep_learner_A_i:
+                xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
+                pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
+                pred = exposure_deep_learner(self._gi_custom_, 
+                                             xdata, data_to_fit[self.exposure], pdata, self.exposure,
+                                             self.cat_vars, self.cont_vars, self.cat_unique_levels)
+            else:
+                xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit)       # Extract via patsy the data
+                pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict)   # Extract via patsy the data
+                pred = exposure_machine_learner(ml_model=self._gi_custom_,        # Custom model application and preds
+                                                xdata=np.asarray(xdata),          # ... with data to fit
+                                                ydata=np.asarray(data_to_fit[self.exposure]),
+                                                pdata=np.asarray(pdata))          # ... and data to predict
 
         # Assigning probability given observed
         pr_i = np.where(data_to_predict[self.exposure] == 1,                  # If A_i = 1
@@ -1061,14 +1107,23 @@ class NetworkTMLE:
                     print(treat_s_model.summary())
 
             else:                                                           # Custom model for Poisson
-                xdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
-                                      data_to_fit)                          # ... from degree restricted
-                pdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
-                                      data_to_predict)                      # ... from degree restricted
-                pred = exposure_machine_learner(ml_model=self._gs_custom_,  # Custom ML model
-                                                xdata=np.asarray(xdata),    # ... with data to fit
-                                                ydata=np.asarray(data_to_fit[self._gs_measure_]),
-                                                pdata=np.asarray(pdata))    # ... and data to predict
+                if self.use_deep_learner_A_i_s:
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1', 
+                                          data_to_fit, return_type="dataframe")       # Extract via patsy the data
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1', 
+                                          data_to_predict, return_type="dataframe")   # Extract via patsy the data
+                    pred = exposure_deep_learner(self._gs_custom_, 
+                                                 xdata, data_to_fit[self._gs_measure_], pdata, self._gs_measure_,
+                                                 self.cat_vars, self.cont_vars, self.cat_unique_levels)
+                else:
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
+                                        data_to_fit)                          # ... from degree restricted
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
+                                        data_to_predict)                      # ... from degree restricted
+                    pred = exposure_machine_learner(ml_model=self._gs_custom_,  # Custom ML model
+                                                    xdata=np.asarray(xdata),    # ... with data to fit
+                                                    ydata=np.asarray(data_to_fit[self._gs_measure_]),
+                                                    pdata=np.asarray(pdata))    # ... and data to predict
 
             pr_s = poisson.pmf(data_to_predict[self._gs_measure_], pred)    # Get f(A_i^s | ...) for measure
 
@@ -1127,12 +1182,19 @@ class NetworkTMLE:
                     print('g-model: '+self._gs_measure_)
                     print(treat_s_model.summary())
             else:                                                                 # Else custom model for threshold
-                xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit)       # Processing data to be fit
-                pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict)   # Processing data to be fit
-                pred = exposure_machine_learner(ml_model=self._gs_custom_,        # Estimating the ML
-                                                xdata=np.asarray(xdata),          # ... with data to fit
-                                                ydata=np.asarray(data_to_fit[self._gs_measure_]),
-                                                pdata=np.asarray(xdata))          # ... and data to predict
+                if self.use_deep_learner_A_i_s:
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit, return_type="dataframe")
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict, return_type="dataframe")
+                    pred = exposure_deep_learner(self._gs_custom_, 
+                                                 xdata, data_to_fit[self._gs_measure_], pdata, self._gs_measure_,
+                                                 self.cat_vars, self.cont_vars, self.cat_unique_levels)
+                else:
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit)       # Processing data to be fit
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict)   # Processing data to be fit
+                    pred = exposure_machine_learner(ml_model=self._gs_custom_,        # Estimating the ML
+                                                    xdata=np.asarray(xdata),          # ... with data to fit
+                                                    ydata=np.asarray(data_to_fit[self._gs_measure_]),
+                                                    pdata=np.asarray(xdata))          # ... and data to predict
             pr_s = np.where(data_to_predict[self._gs_measure_] == 1,              # Getting predicted values
                             pred,
                             1 - pred)

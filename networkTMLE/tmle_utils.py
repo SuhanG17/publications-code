@@ -242,32 +242,7 @@ def bounding(ipw, bound):
     return ipw
 
 
-# def outcome_learner_fitting(ml_model, xdata, ydata):
-#     """Internal function to fit custom_models for the outcome nuisance model.
-
-#     Parameters
-#     ----------
-#     ml_model :
-#         Unfitted model to be fit.
-#     xdata : array
-#         Covariate data to fit the model with
-#     ydata : array
-#         Outcome data to fit the model with
-
-#     Returns
-#     -------
-#     Fitted user-specified model
-#     """
-#     try:
-#         fm = ml_model.fit(X=xdata, y=ydata)
-#     except TypeError:
-#         raise TypeError("Currently custom_model must have the 'fit' function with arguments 'X', 'y'. This "
-#                         "covers both sklearn and supylearner. If there is a predictive model you would "
-#                         "like to use, please open an issue at https://github.com/pzivich/zepid and I "
-#                         "can work on adding support")
-#     return fm
-
-def outcome_learner_fitting(ml_model, xdata, ydata, dl_learner, split_ratio, batch_size, shuffle):
+def outcome_learner_fitting(ml_model, xdata, ydata):
     """Internal function to fit custom_models for the outcome nuisance model.
 
     Parameters
@@ -278,23 +253,18 @@ def outcome_learner_fitting(ml_model, xdata, ydata, dl_learner, split_ratio, bat
         Covariate data to fit the model with
     ydata : array
         Outcome data to fit the model with
-    dl_learner: bool
-        if True, then the model is a deep learner
 
     Returns
     -------
     Fitted user-specified model
     """
-    if dl_learner:
-        fm = ml_model.fit(split_ratio, batch_size, shuffle)
-    else:
-        try:
-            fm = ml_model.fit(X=xdata, y=ydata)
-        except TypeError:
-            raise TypeError("Currently custom_model must have the 'fit' function with arguments 'X', 'y'. This "
-                            "covers both sklearn and supylearner. If there is a predictive model you would "
-                            "like to use, please open an issue at https://github.com/pzivich/zepid and I "
-                            "can work on adding support")
+    try:
+        fm = ml_model.fit(X=xdata, y=ydata)
+    except TypeError:
+        raise TypeError("Currently custom_model must have the 'fit' function with arguments 'X', 'y'. This "
+                        "covers both sklearn and supylearner. If there is a predictive model you would "
+                        "like to use, please open an issue at https://github.com/pzivich/zepid and I "
+                        "can work on adding support")
     return fm
 
 
@@ -497,3 +467,145 @@ def create_categorical(data, variables, bins, labels, verbose=False):
                 warnings.warn("It looks like some of your categories have missing values when being generated on the "
                               "input data. Please check pandas.cut to make sure the `bins` and `labels` arguments are "
                               "being used correctly.", UserWarning)
+                
+
+######################################### SG_modified: Deep Learning Related Functions #########################################
+# call with patsy_matrix_dataframe=xdata
+def get_model_cat_cont_split_patsy_matrix(patsy_matrix_dataframe, cat_vars, cont_vars, cat_unique_levels):
+    '''initiate model_car_vars, model_cont_vars, and cat_unique_levles, and
+    update cat_vars, cont_vars, cat_unique_levels based on patsy matrix dataframe'''
+
+    vars = patsy_matrix_dataframe.columns # all variables in patsy matrix
+
+    model_cat_vars = []
+    model_cont_vars = []
+    model_cat_unique_levels = {}
+
+    for var in vars:
+        if var in cat_vars:
+            model_cat_vars.append(var)
+            model_cat_unique_levels[var] = cat_unique_levels[var]
+        elif var in cont_vars:
+            model_cont_vars.append(var)
+        else:
+            # update both model_{} and universal cat_vars, cont_vars adn cat_unique_levels to keep track of all variables
+            if '**' in var: # quadratic term, treated as continuous
+                model_cont_vars.append(var)
+                cont_vars.append(var)
+            elif 'C()' in var: # categorical term
+                model_cat_vars.append(var)
+                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
+                cat_vars.append(var)
+                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
+            elif '_t' in var: # threshold term, treated as categorical
+                model_cat_vars.append(var)
+                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1 
+                cat_vars.append(var)
+                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
+            elif ':' in var: # interaction term, treated as continuous even between two categorical variables
+                model_cont_vars.append(var)
+                cont_vars.appen(var)
+            else:
+                raise ValueError(f'{var} is a unseen type of variable, cannot be assigned to categorical or continuous')
+    return model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels
+
+# call before feed dataframe to the deep learning fitter: xdata and ydata should be in one dataframe
+def append_target_to_df(ydata, patsy_matrix_dataframe, target):
+    patsy_matrix_dataframe[target] = ydata
+    return patsy_matrix_dataframe
+
+
+def exposure_deep_learner(deep_learner, xdata, ydata, pdata, exposure,
+                          cat_vars, cont_vars, cat_unique_levels):
+    """Internal function to fit custom_models for the exposure nuisance model and generate the predictions.
+
+    Parameters
+    ----------
+    deep_learner :
+        instance of the deep learning model
+    xdata : pd.dataframe
+        Covariate data to fit the model with
+    ydata : pandas.core.series.Series
+        Outcome data to fit the model with
+    pdata : pd.dataframe
+        Covariate data to generate the predictions with.
+    exposure: string
+        Exposure patamerter to predict
+    cat_vars: list
+        list of categorical variables for df_restricted, not xdata
+    cont_vars: list
+        list of continuous variables for df_restricted, not xdata
+    cat_unique_levles: dict
+        dictionary of categorical variables and their unique levels for df_restricted, not xdata
+
+    Returns
+    -------
+    array
+        Predicted values for the outcome (probability if binary, and expected value otherwise)
+    """
+    # Re-arrange data
+    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+                                                                                                                                             cat_vars, cont_vars, cat_unique_levels)
+    deep_learner_df = append_target_to_df(ydata, xdata, exposure)  
+
+    # Fitting model
+    best_model_path = deep_learner.fit(deep_learner_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels)
+
+    # Generating predictions
+    pred = deep_learner.predict(pdata, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels)
+    pred = np.concatenate(pred, 0) # [[batch_size, 1], [bs, 1] ...] -> [sample_size, 1]
+    pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
+
+    return pred
+
+def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
+                         cat_vars, cont_vars, cat_unique_levels, 
+                         predict_with_best=False, custom_path=None):
+    """Internal function to fit custom_models for the outcome nuisance model.
+
+    Parameters
+    ----------
+    deep_learner :
+        instance of the deep learning model
+    xdata : pd.dataframe
+        Covariate data to fit the model with
+    ydata : pandas.core.series.Series
+        Outcome data to fit the model with
+    exposure: string
+        Exposure patamerter to predict
+    cat_vars: list
+        list of categorical variables for df_restricted, not xdata
+    cont_vars: list
+        list of continuous variables for df_restricted, not xdata
+    cat_unique_levles: dict
+        dictionary of categorical variables and their unique levels for df_restricted, not xdata
+    predict_with_best: bool
+        if use the best model to predict, default is False
+    custom_path: string
+        path to saved best model, if different from model.save_path
+
+    Returns
+    -------
+    model_object
+        best model fitted
+    array
+        Predicted values for the outcome (probability if binary, and expected value otherwise)
+    """
+    # Re-arrange data
+    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+                                                                                                                                             cat_vars, cont_vars, cat_unique_levels)
+    
+    if not predict_with_best:
+        deep_learner_df = append_target_to_df(ydata, xdata, outcome)  
+        # Fitting model
+        best_model_path = deep_learner.fit(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels)
+
+    # Generating predictions
+    pred = deep_learner.predict(xdata, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, custom_path=custom_path)
+    pred = np.concatenate(pred, 0) # [[batch_size, 1], [bs, 1] ...] -> [sample_size, 1]
+    pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
+
+    if not predict_with_best:
+        return best_model_path, pred
+    else:
+        return pred
