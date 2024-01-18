@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import statsmodels.api as sm
+import torch
 
 
 def probability_to_odds(prob):
@@ -514,9 +515,33 @@ def append_target_to_df(ydata, patsy_matrix_dataframe, target):
     patsy_matrix_dataframe[target] = ydata
     return patsy_matrix_dataframe
 
+def get_probability_from_multilevel_prediction(pred:np.ndarray, target:pd.core.series.Series):
+    ''' get the predicted probability for the target category '''
+    sample_dim_indices = np.arange(pred.shape[0])[:, np.newaxis] #[num_samples] -> [num_samples, 1]
+    class_indices = target.to_numpy(dtype='int')[:, np.newaxis] #pd.series -> np.array -> [num_samples, 1]
+    pred = pred[sample_dim_indices, class_indices].squeeze(-1) #[num_samples, n_output] -> [num_samples, 1] -> [num_sample]
+    return pred
 
-def exposure_deep_learner(deep_learner, xdata, ydata, pdata, exposure,
-                          cat_vars, cont_vars, cat_unique_levels):
+# def get_n_output_for_summary_variable(gs_measure, max_degree, exposure_series:pd.core.series.Series):
+#     ''' get the all possible categorical levels for A_i^s model, 
+#     because summary measure levels may change at _generate_pooled_sample() '''
+
+#     if 'sum' in gs_measure: # use sum as summary measure
+#         max_level = pd.unique(exposure_series).max()
+#         n_output = max_degree*max_level # maximum number of possible neighbors * maximum level = all possible categorical levels
+#     return n_output
+
+def select_pooled_sample_with_observed_data(target, pooled_data, observed_data):
+    ''' select the pooled sample with observed data target level '''
+    pooled_subset = pooled_data.copy()
+    observed_levels = observed_data[target]
+    pooled_subset = pooled_subset.loc[pooled_subset[target].isin(observed_levels)]
+    return pooled_subset
+
+
+def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
+                          cat_vars, cont_vars, cat_unique_levels, n_output, 
+                          custom_path, print_every):
     """Internal function to fit custom_models for the exposure nuisance model and generate the predictions.
 
     Parameters
@@ -529,6 +554,8 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, exposure,
         Outcome data to fit the model with
     pdata : pd.dataframe
         Covariate data to generate the predictions with.
+    pdata_y : pandas.core.series.Series
+        Truth for predictions, used to evaluate model performance
     exposure: string
         Exposure patamerter to predict
     cat_vars: list
@@ -537,6 +564,12 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, exposure,
         list of continuous variables for df_restricted, not xdata
     cat_unique_levles: dict
         dictionary of categorical variables and their unique levels for df_restricted, not xdata
+    n_output: int
+        number of levels in output layer, 2 for binary, multilevel as specified
+    custom_path: string
+        path to saved best model, if different from model.save_path
+    print_every: int
+        print loss and acc per print_every steps
 
     Returns
     -------
@@ -546,20 +579,28 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, exposure,
     # Re-arrange data
     model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
                                                                                                                                              cat_vars, cont_vars, cat_unique_levels)
-    deep_learner_df = append_target_to_df(ydata, xdata, exposure)  
+    fit_df = append_target_to_df(ydata, xdata, exposure)  
 
     # Fitting model
-    best_model_path = deep_learner.fit(deep_learner_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels)
+    if print_every is not None:
+        deep_learner.print_every = print_every
+    if custom_path is not None:
+        deep_learner.save_path = custom_path
+    best_model_path = deep_learner.fit(fit_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
 
     # Generating predictions
-    pred = deep_learner.predict(pdata, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels)
-    pred = np.concatenate(pred, 0) # [[batch_size, 1], [bs, 1] ...] -> [sample_size, 1]
-    pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
+    pred_df = append_target_to_df(pdata_y, pdata, exposure)
+    pred = deep_learner.predict(pred_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
+    pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
+    if n_output == 2: # binary classification with BCEloss
+        pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
+    else:
+        pred = get_probability_from_multilevel_prediction(pred, pdata_y) 
 
     return pred
 
 def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
-                         cat_vars, cont_vars, cat_unique_levels, 
+                         cat_vars, cont_vars, cat_unique_levels, n_output,
                          predict_with_best=False, custom_path=None):
     """Internal function to fit custom_models for the outcome nuisance model.
 
@@ -579,6 +620,8 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
         list of continuous variables for df_restricted, not xdata
     cat_unique_levles: dict
         dictionary of categorical variables and their unique levels for df_restricted, not xdata
+    n_output: int
+        number of levels in output layer, 2 for binary, multilevel as specified 
     predict_with_best: bool
         if use the best model to predict, default is False
     custom_path: string
@@ -598,12 +641,15 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
     if not predict_with_best:
         deep_learner_df = append_target_to_df(ydata, xdata, outcome)  
         # Fitting model
-        best_model_path = deep_learner.fit(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels)
+        best_model_path = deep_learner.fit(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
 
     # Generating predictions
-    pred = deep_learner.predict(xdata, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, custom_path=custom_path)
-    pred = np.concatenate(pred, 0) # [[batch_size, 1], [bs, 1] ...] -> [sample_size, 1]
-    pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
+    pred = deep_learner.predict(xdata, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output=n_output, custom_path=custom_path)
+    pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
+    if n_output == 2: # binary classification with BCEloss
+        pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
+    else:
+        pred = get_probability_from_multilevel_prediction(pred, ydata) 
 
     if not predict_with_best:
         return best_model_path, pred

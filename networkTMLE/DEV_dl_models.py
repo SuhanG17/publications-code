@@ -970,167 +970,76 @@ df_restricted = df.loc[df['__degree_flag__'] == 0].copy()
 
 
 
+######################## _generate_pooled_sample #########################
+p=0.35
+samples=100
+seed=None
 
+ # Prep for pooled data set creation
+rng = np.random.default_rng(seed)  # Setting the seed for bootstraps
+pooled_sample = []
+# TODO one way to potentially speed up code is to run this using Pool. Easy for parallel
+# this is also the best target for optimization since it takes about ~85% of current run times
 
-import patsy
-tmp_data = patsy.dmatrix(_gi_model + ' -1', df_restricted, return_type="dataframe")
+for s in range(samples):                                    # For each of the *m* samples
+    g = df.copy()                                      # Create a copy of the data
+    probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
+                         p=p,                               # ... based on policy-assigned probabilities
+                         size=g.shape[0])                   # ... for the N units
+    g[exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degree
+                           g[exposure], probs)    # ... keeps restricted nodes as observed A_i
 
+    # Generating all summary measures based on the new exposure (could maybe avoid for all?)
+    g[exposure+'_sum'] = fast_exp_map(adj_matrix, np.array(g[exposure]), measure='sum')
+    g[exposure + '_mean'] = fast_exp_map(adj_matrix, np.array(g[exposure]), measure='mean')
+    g[exposure + '_mean'] = g[exposure + '_mean'].fillna(0)            # isolates should have mean=0
+    g[exposure + '_var'] = fast_exp_map(adj_matrix, np.array(g[exposure]), measure='var')
+    g[exposure + '_var'] = g[exposure + '_var'].fillna(0)              # isolates should have mean=0
+    g[exposure + '_mean_dist'] = fast_exp_map(adj_matrix,
+                                                    np.array(g[exposure]), measure='mean_dist')
+    g[exposure + '_mean_dist'] = g[exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
+    g[exposure + '_var_dist'] = fast_exp_map(adj_matrix,
+                                                    np.array(g[exposure]), measure='var_dist')
+    g[exposure + '_mean_dist'] = g[exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
 
-qn_model = "statin + statin_sum + L + I(R**2)"
+    # # Logic if no summary measure was specified (uses the complete factor approach)
+    # if self._gs_measure_ is None:
+    #     network = self.network.copy()                           # Copy the network
+    #     a = np.array(g[self.exposure])                          # Transform A_i into array
+    #     for n in network.nodes():                               # For each node,
+    #         network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
+    #     df = exp_map_individual(network,                        # Now do the individual exposure maps with new
+    #                             variable=self.exposure,
+    #                             max_degree=self._max_degree_).fillna(0)
+    #     for c in self._nonparam_cols_:                          # Adding back these np columns
+    #         g[c] = df[c]
 
-data = patsy.dmatrix(qn_model + ' -1',
-                     df_restricted)
+    # # Re-creating any threshold variables in the pooled sample data
+    # if self._thresholds_any_:
+    #     create_threshold(data=g,
+    #                         variables=self._thresholds_variables_,
+    #                         thresholds=self._thresholds_,
+    #                         definitions=self._thresholds_def_)
 
-tmp = patsy.dmatrix(qn_model + ' -1',
-                     df_restricted, return_type="dataframe")
-tmp
+    # # Re-creating any categorical variables in the pooled sample data
+    # if self._categorical_any_:
+    #     create_categorical(data=g,
+    #                         variables=self._categorical_variables_,
+    #                         bins=self._categorical_,
+    #                         labels=self._categorical_def_,
+    #                         verbose=False)
 
-vars = tmp.columns
-vars
+    g['_sample_id_'] = s         # Setting sample ID
+    pooled_sample.append(g)      # Adding to list (for later concatenate)
 
-for var in vars:
-    if var in cat_vars:
-        pass
-    elif var in cont_vars:
-        pass
-    else:
-        print(var)
-        if '**' in var: # quadratic term
-            pass
-            # cont_vars.append(var)
-        elif 'C()' in var: # categorical term
-            pass
-            # cat_vars.append(var)
-            # cat_unique_levels[var] = pd.unique(data[var]).max() + 1
-        elif '_t' in var: # threshold term, treated as categorical
-            pass
-            cat_vars.append(var)
-            cat_unique_levels[var] = pd.unique(data[var]).max() + 1
-        elif ':' in var: # interaction term, treated as continuous even between two categorical variables
-            pass
-            # cont_vars.appen(var)
+# Returning the pooled data set
+pooled_data = pd.concat(pooled_sample, axis=0, ignore_index=True)
+pooled_data.shape
 
-def get_model_cat_cont_split_patsy_matrix(patsy_matrix_dataframe, cat_vars, cont_vars, cat_unique_levels):
-    '''initiate model_car_vars, model_cont_vars, and cat_unique_levles, and
-    update cat_vars, cont_vars, cat_unique_levels based on patsy matrix dataframe'''
+pd.unique(pooled_data['statin_sum'])
+pd.unique(df_restricted['statin_sum'])
 
-    vars = patsy_matrix_dataframe.columns # all variables in patsy matrix
+(pooled_data['statin_sum'] <= 4).sum()
+(pooled_data['statin_sum'] > 4).sum()
 
-    model_cat_vars = []
-    model_cont_vars = []
-    model_cat_unique_levels = {}
-
-    for var in vars:
-        if var in cat_vars:
-            model_cat_vars.append(var)
-            model_cat_unique_levels[var] = cat_unique_levels[var]
-        elif var in cont_vars:
-            model_cont_vars.append(var)
-        else:
-            # update both model_{} and universal cat_vars, cont_vars adn cat_unique_levels to keep track of all variables
-            if '**' in var: # quadratic term, treated as continuous
-                model_cont_vars.append(var)
-                cont_vars.append(var)
-            elif 'C()' in var: # categorical term
-                model_cat_vars.append(var)
-                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
-                cat_vars.append(var)
-                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
-            elif '_t' in var: # threshold term, treated as categorical
-                model_cat_vars.append(var)
-                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1 
-                cat_vars.append(var)
-                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
-            elif ':' in var: # interaction term, treated as continuous even between two categorical variables
-                model_cont_vars.append(var)
-                cont_vars.appen(var)
-            else:
-                raise ValueError(f'{var} is a unseen type of variable, cannot be assigned to categorical or continuous')
-    return model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels
-
-
-model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(tmp_data, 
-                                                                               cat_vars, cont_vars, cat_unique_levels)
-
-cat_vars
-cont_vars
-
-target
-df_restricted[target]
-
-
-
-def append_target_to_df(df, patsy_matrix_dataframe, target):
-    patsy_matrix_dataframe[target] = df[target]
-    return patsy_matrix_dataframe
-
-tmp_data = append_target_to_df(df_restricted, tmp_data, target)
-
-
-
-# define categories and thresholds
-from tmle_utils import create_categorical
-
-def define_category(df_restricted, variable, bins, labels=False):
-    """Function arbitrarily allows for multiple different defined thresholds
-
-    Parameters
-    ----------
-    variable : str
-        Variable to generate categories for
-    bins : list, set, array
-        Bin cutpoints to generate the categorical variable for. Uses ``pandas.cut(..., include_lowest=True)`` to
-        create the binned variables.
-    labels : list, set, array
-        Specified labels. Can be given custom labels, but generally recommend to keep set as False
-    """
-    # self._categorical_any_ = True                   # Update logic to understand at least one category exists
-    # self._categorical_variables_.append(variable)   # Add the variable to the list of category-generations
-    # self._categorical_.append(bins)                 # Add the cut-points for the bins to the list of bins
-    # self._categorical_def_.append(labels)           # Add the specified labels for the bins to the label list
-    create_categorical(data=df_restricted,     # Create the desired category variable
-                        variables=[variable],        # ... for the specified variable
-                        bins=[bins],                 # ... for the specified bins
-                        labels=[labels],             # ... with the specified labels
-                        verbose=True)                # ... warns user if NaN's are being generated
-
-
-define_category(df_restricted, variable='R_1_sum', bins=[0, 1, 5], labels=False)
-pd.unique(df_restricted['R_1_sum_c'])
-define_category(df_restricted, variable='R_2_sum', bins=[0, 1, 5], labels=False)
-pd.unique(df_restricted['R_2_sum_c'])
-define_category(df_restricted, variable='R_3_sum', bins=[0, 2], labels=False)
-pd.unique(df_restricted['R_3_sum_c'])
-
-gin_model = "L + A_30 + R_1 + R_2 + R_3 + C(R_1_sum_c) + C(R_2_sum_c) + C(R_3_sum_c) + A_mean_dist + L_mean_dist"
-
-xdata = patsy.dmatrix(gin_model + ' - 1', df_restricted)       # Extract via patsy the data
-xdata
-
-xdata_tmp = patsy.dmatrix(gin_model + ' - 1', df_restricted, return_type='dataframe')       # Extract via patsy the data
-xdata_tmp
-
-pd.unique(xdata_tmp['C(R_1_sum_c)[0.0]'].astype('int')).max() + 1
-
-# TODO: categorical variable should be int/long tensor, either do it here or in dataset
-for col in xdata_tmp.columns:
-    print(xdata_tmp[col].dtype)
-
-# R_1_sum_c = 0
-np.asarray(xdata)[:, 0]
-df_restricted['R_1_sum_c']
-np.array_equal(np.asarray(xdata)[:, 0], df_restricted['R_1_sum_c']==0)
-# R_1_sum_c = 1
-np.array_equal(np.asarray(xdata)[:, 1], df_restricted['R_1_sum_c']==1)
-# R_2_sum_c = 0
-np.asarray(xdata)[:, 2]
-np.array_equal(np.asarray(xdata)[:, 2], df_restricted['R_2_sum_c'])
-# R_3_sum_c only has 1 level
-
-
-np.asarray(xdata)[:, 3]
-df_restricted['L']
-
-# order matters
-patsy.dmatrix('C(R_1_sum_c) + C(R_2_sum_c) + C(R_3_sum_c) - 1', df_restricted)
-patsy.dmatrix('C(R_2_sum_c) + C(R_1_sum_c) + C(R_3_sum_c) - 1', df_restricted)
+pooled_data.loc[pooled_data['statin_sum'].isin(df_restricted['statin_sum'])].shape

@@ -6,14 +6,13 @@ from torch.utils.data import Dataset, DataLoader, Subset
 
 ######################## define dataset ########################
 class DfDataset(Dataset):
-    def __init__(self, patsy_matrix_dataframe, target=None, fit=True, 
+    def __init__(self, patsy_matrix_dataframe, target=None, 
                  model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
         ''' Retrieve train,label and pred data from Dataframe directly
         Args:  
             patsy_matrix_dataframe: pd.DataFrame, data, i.e., dataframe created from patsy.dmatrix()
             model: str, model formula, i.e., _gi_model
             target: str, target variable, i.e., exposure/outcome
-            fit: bool, whether the dataset is for fitting or prediction
             model_cat_vars: list, categorical variables in patsy_matrix_dataframe, subset of cat_vars
             model_cont_vars: list, continuous variables in patsy_matrix_dataframe, subset of cont_vars
             model_cat_unique_levels: dict, number of unique levels for each categorical variable of patsy_matrix_dataframe, subset of cat_unique_levels
@@ -22,15 +21,13 @@ class DfDataset(Dataset):
         '''
         self.df = patsy_matrix_dataframe 
         self.target = target
-        self.fit = fit
         self.model_cat_vars, self.model_cont_vars, self.model_cat_unique_levels = model_cat_vars, model_cont_vars, model_cat_unique_levels
 
         self.x_cat, self.x_cont = self._split_cat_cont() 
-        if self.fit:
-            self.y = self._get_labels()
-        else:
-            self.y = np.empty((self.x_cat.shape[0], 1))
-            self.y.fill(-1) # create dummy target for pdata
+        self.y = self._get_labels()
+        # if no target is available
+        # self.y = np.empty((self.x_cat.shape[0], 1))
+        # self.y.fill(-1) # create dummy target for pdata
     
     def _split_cat_cont(self):
         return self.df[self.model_cat_vars].to_numpy(), self.df[self.model_cont_vars].to_numpy()

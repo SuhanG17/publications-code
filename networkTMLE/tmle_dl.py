@@ -14,7 +14,8 @@ from tmle_utils import (network_to_df, fast_exp_map, exp_map_individual, tmle_un
                         probability_to_odds, odds_to_probability, bounding,
                         outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner, exposure_deep_learner, outcome_deep_learner,
                         targeting_step, create_threshold, create_categorical,
-                        get_model_cat_cont_split_patsy_matrix, append_target_to_df)
+                        select_pooled_sample_with_observed_data,
+                        get_model_cat_cont_split_patsy_matrix, append_target_to_df, get_probability_from_multilevel_prediction)
 
 
 class NetworkTMLE:
@@ -438,9 +439,11 @@ class NetworkTMLE:
         else:
             if self.use_deep_learner_outcome:
                 xdata = patsy.dmatrix(model + ' - 1', self.df_restricted, return_type="dataframe")
+                ydata = self.df_restricted[self.outcome] 
+                n_output = pd.unique(ydata).shape[0]
                 self._q_custom_, self._Qinit_ = outcome_deep_learner(custom_model, 
-                                                                     xdata, self.df_restricted[self.outcome], self.outcome,
-                                                                     self.cat_vars, self.cont_vars, self.cat_unique_levels)
+                                                                     xdata, ydata, self.outcome,
+                                                                     self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output)
             else:
                 # Extract data using the model
                 data = patsy.dmatrix(model + ' - 1',                      # Specified model WITHOUT an intercept
@@ -543,8 +546,9 @@ class NetworkTMLE:
         else:  # Custom input model by user
             if self.use_deep_learner_outcome:
                 xdata = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted, return_type="dataframe")
+                n_output = pd.unique(pooled_data_restricted[self.outcome]).shape[0]
                 y_star = outcome_deep_learner(self._q_custom_, xdata, None, None, 
-                                              self.cat_vars, self.cont_vars, self.cat_unique_levels,
+                                              self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
                                               predict_with_best=True, custom_path=None)
             else:
                 d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted)  # ... extract data via patsy
@@ -880,7 +884,8 @@ class NetworkTMLE:
                                                       data_to_predict=self.df_restricted.copy(),
                                                       distribution=self._map_dist_,
                                                       verbose_label='Weight - Numerator',
-                                                      store_model=False)
+                                                      store_model=False,
+                                                      print_every=500)
 
         # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
         iptw = numerator / self._denominator_           # Divide numerator by denominator
@@ -973,7 +978,8 @@ class NetworkTMLE:
         # Returning the pooled data set
         return pd.concat(pooled_sample, axis=0, ignore_index=True)
 
-    def _estimate_exposure_nuisance_(self, data_to_fit, data_to_predict, distribution, verbose_label, store_model):
+    def _estimate_exposure_nuisance_(self, data_to_fit, data_to_predict, distribution, verbose_label, store_model, 
+                                     custom_path=None, print_every=None):
         """Unified function to estimate the numerator and denominator of the weights.
 
         Parameters
@@ -1018,10 +1024,16 @@ class NetworkTMLE:
         else:                                                                 # Otherwise use the custom_model
             if self.use_deep_learner_A_i:
                 xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
+                ydata = data_to_fit[self.exposure] 
+                n_output = pd.unique(ydata).shape[0]
+                print(f'gi_model: n_output = {n_output} for target variable {self.exposure}')
+
                 pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
+                pdata_y = data_to_predict[self.exposure]
                 pred = exposure_deep_learner(self._gi_custom_, 
-                                             xdata, data_to_fit[self.exposure], pdata, self.exposure,
-                                             self.cat_vars, self.cont_vars, self.cat_unique_levels)
+                                             xdata, ydata, pdata, pdata_y, self.exposure,
+                                             self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
+                                             custom_path, print_every)
             else:
                 xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit)       # Extract via patsy the data
                 pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict)   # Extract via patsy the data
@@ -1108,13 +1120,21 @@ class NetworkTMLE:
 
             else:                                                           # Custom model for Poisson
                 if self.use_deep_learner_A_i_s:
+                    data_to_fit_subset = select_pooled_sample_with_observed_data(self._gs_measure_, data_to_fit, data_to_predict)
+                    print(f'gs_model: use {data_to_fit_subset.shape[0]} samples from original {data_to_fit.shape[0]} to fit the model')
                     xdata = patsy.dmatrix(self._gs_model + ' - 1', 
-                                          data_to_fit, return_type="dataframe")       # Extract via patsy the data
+                                          data_to_fit_subset, return_type="dataframe")       # Extract via patsy the data
+                    ydata = data_to_fit_subset[self._gs_measure_]
+                    n_output = pd.unique(ydata).shape[0] 
+                    print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
+
                     pdata = patsy.dmatrix(self._gs_model + ' - 1', 
                                           data_to_predict, return_type="dataframe")   # Extract via patsy the data
+                    pdata_y = data_to_predict[self._gs_measure_]
                     pred = exposure_deep_learner(self._gs_custom_, 
-                                                 xdata, data_to_fit[self._gs_measure_], pdata, self._gs_measure_,
-                                                 self.cat_vars, self.cont_vars, self.cat_unique_levels)
+                                                 xdata, ydata, pdata, pdata_y, self._gs_measure_,
+                                                 self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
+                                                 custom_path, print_every)
                 else:
                     xdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
                                         data_to_fit)                          # ... from degree restricted
@@ -1124,8 +1144,11 @@ class NetworkTMLE:
                                                     xdata=np.asarray(xdata),    # ... with data to fit
                                                     ydata=np.asarray(data_to_fit[self._gs_measure_]),
                                                     pdata=np.asarray(pdata))    # ... and data to predict
-
-            pr_s = poisson.pmf(data_to_predict[self._gs_measure_], pred)    # Get f(A_i^s | ...) for measure
+            
+            if self.use_deep_learner_A_i_s: # deep learner output probability already, no need to transform
+                pr_s = pred
+            else:
+                pr_s = poisson.pmf(data_to_predict[self._gs_measure_], pred)    # Get f(A_i^s | ...) for measure
 
         elif distribution == 'multinomial':                              # If multinomial distribution
             gs_model = self._gs_measure_ + ' ~ ' + self._gs_model        # Setup the model form
