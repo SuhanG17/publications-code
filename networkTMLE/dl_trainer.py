@@ -345,9 +345,13 @@ if __name__ == '__main__':
     # tmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
     #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
     #                    use_deep_learner_A_i=True) 
+    # tmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
+    #                   cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                   use_deep_learner_A_i_s=True) 
     tmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
-                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                    use_deep_learner_A_i_s=True) 
+                       cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                       use_deep_learner_outcome=True) 
+
     
     # instantiation of MLP model
     # 5 fold cross validation 
@@ -361,109 +365,143 @@ if __name__ == '__main__':
     
     tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3")
     # tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=mlp_learner) # use_deep_learner_A_i=True
-    # tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
-    #                         measure='sum', distribution='poisson')  # Applying a Poisson model
     tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
-                        measure='sum', distribution='poisson', custom_model=mlp_learner)  # use_deep_learner_A_i_s=True
-    tmle.outcome_model("statin + statin_sum + A_sqrt + R + L")
+                            measure='sum', distribution='poisson')  # Applying a Poisson model
+    # tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
+    #                          measure='sum', distribution='poisson', custom_model=mlp_learner)  # use_deep_learner_A_i_s=True
+    # tmle.outcome_model("statin + statin_sum + A_sqrt + R + L")
+    tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) # use_deep_learner_outcome=True
     tmle.fit(p=0.35, bound=0.01)
     tmle.summary()
 
 
-    # ############################# scratch #################################
-    import patsy
-    data_to_fit = tmle.df_restricted.copy()
-    xdata = patsy.dmatrix(tmle._gs_model + ' - 1', 
-                          data_to_fit, return_type="dataframe")       # Extract via patsy the data
-    ydata = data_to_fit[tmle._gs_measure_]
-    n_output = pd.unique(ydata).shape[0] 
-    # print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
+    # # ############################# scratch #################################
+    # # poisson model
+    # import statsmodels.api as sm
+    # import statsmodels.formula.api as smf
+    # from scipy.stats import poisson, norm
 
-    # pdata = patsy.dmatrix(self._gs_model + ' - 1', 
-    #                         data_to_predict, return_type="dataframe")   # Extract via patsy the data
-    # pdata_y = data_to_predict[self._gs_measure_]
+    # data_to_fit = tmle.df_restricted.copy()
+    # data_to_predict = tmle.df_restricted.copy()
+   
+    # gs_model = tmle._gs_measure_ + ' ~ ' + tmle._gs_model     # Setup the model form
+    # # if self._gs_custom_ is None:                              # If no custom model provided
+    # f = sm.families.family.Poisson()                      # ... GLM with Poisson family
+    # treat_s_model = smf.glm(gs_model,                     # Estimate model
+    #                         data_to_fit,                  # ... with data to fit
+    #                         family=f).fit()               # ... and Poisson distribution
+    # # if store_model:                                       # If estimating denominator
+    # #     self._treatment_models.append(treat_s_model)      # ... store the model
+    # pred = treat_s_model.predict(data_to_predict)         # Predicted values with data to predict
 
-    from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df
-    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-                                                                                                                                             cat_vars, cont_vars, cat_unique_levels)
-    fit_df = append_target_to_df(ydata, xdata, tmle._gs_measure_)  
+    # # # If verbose requested, provide model output
+    # # if self._verbose_:
+    # #     print('==============================================================================')
+    # #     print(verbose_label+': '+self._gs_measure_)
+    # #     print(treat_s_model.summary())
 
-    # initiate best model
-    # self.best_model = None
-    # self.best_loss = np.inf        
+    # pr_s = poisson.pmf(data_to_predict[tmle._gs_measure_], pred)
 
-    # instantiate model
-    # self.n_output = n_output
+
+    # import patsy
+    # data_to_fit = tmle.df_restricted.copy()
+    # xdata = patsy.dmatrix(tmle._gs_model + ' - 1', 
+    #                       data_to_fit, return_type="dataframe")       # Extract via patsy the data
+    # ydata = data_to_fit[tmle._gs_measure_]
+    # n_output = pd.unique(ydata).shape[0] 
+    # # print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
+
+    # # pdata = patsy.dmatrix(self._gs_model + ' - 1', 
+    # #                         data_to_predict, return_type="dataframe")   # Extract via patsy the data
+    # # pdata_y = data_to_predict[self._gs_measure_]
+
+    # from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df
+    # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+    #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
+    # fit_df = append_target_to_df(ydata, xdata, tmle._gs_measure_)  
+
+    # # initiate best model
+    # # self.best_model = None
+    # # self.best_loss = np.inf        
+
+    # # instantiate model
+    # # self.n_output = n_output
     
 
-    model_cat_vars_new = ['A_30']
-    model_cont_vars_new = ['L', 'statin', 'R_1', 'R_2', 'R_3']
-    model_cat_unique_levels_new = {'A_30':31}
-    mlp_learner.model = mlp_learner._build_model(model_cat_vars_new, 
-                                                 model_cont_vars_new, 
-                                                 model_cat_unique_levels_new, n_output)
+    # model_cat_vars_new = ['A_30']
+    # model_cont_vars_new = ['L', 'statin', 'R_1', 'R_2', 'R_3']
+    # model_cat_unique_levels_new = {'A_30':31}
+    # mlp_learner.model = mlp_learner._build_model(model_cat_vars_new, 
+    #                                              model_cont_vars_new, 
+    #                                              model_cat_unique_levels_new, n_output)
 
-    # mlp_learner.model = mlp_learner._build_model(model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
-    mlp_learner.optimizer = mlp_learner._optimizer()
-    mlp_learner.n_output = n_output
-    mlp_learner.criterion = mlp_learner._loss_fn()
+    # # mlp_learner.model = mlp_learner._build_model(model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
+    # mlp_learner.optimizer = mlp_learner._optimizer()
+    # mlp_learner.n_output = n_output
+    # mlp_learner.criterion = mlp_learner._loss_fn()
 
-    # target is exposure for nuisance models, outcome for outcome model
-    fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
+    # # target is exposure for nuisance models, outcome for outcome model
+    # fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
 
 
+    # # splits, dset = mlp_learner._data_preprocess(fit_df, tmle._gs_measure_,
+    # #                                             model_cat_vars=model_cat_vars, 
+    # #                                             model_cont_vars=model_cont_vars, 
+    # #                                             model_cat_unique_levels=model_cat_unique_levels)
     # splits, dset = mlp_learner._data_preprocess(fit_df, tmle._gs_measure_,
-    #                                             model_cat_vars=model_cat_vars, 
-    #                                             model_cont_vars=model_cont_vars, 
-    #                                             model_cat_unique_levels=model_cat_unique_levels)
-    splits, dset = mlp_learner._data_preprocess(fit_df, tmle._gs_measure_,
-                                                model_cat_vars=model_cat_vars_new, 
-                                                model_cont_vars=model_cont_vars_new, 
-                                                model_cat_unique_levels=model_cat_unique_levels_new)
+    #                                             model_cat_vars=model_cat_vars_new, 
+    #                                             model_cont_vars=model_cont_vars_new, 
+    #                                             model_cat_unique_levels=model_cat_unique_levels_new)
 
-    for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dset)))):
-        print('Fold {}'.format(fold + 1))
-        train_loader, valid_loader = get_kfold_dataloaders(dset, train_idx, val_idx, 
-                                                           batch_size=16,
-                                                           shuffle=True)
-        break
+    # for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dset)))):
+    #     print('Fold {}'.format(fold + 1))
+    #     train_loader, valid_loader = get_kfold_dataloaders(dset, train_idx, val_idx, 
+    #                                                        batch_size=16,
+    #                                                        shuffle=True)
+    #     break
 
-    epochs = 20
-    mlp_learner.train_loader = train_loader
-    mlp_learner.valid_loader = valid_loader
-    for epoch in range(epochs):
-        print(f'============================= Epoch {epoch + 1}: Training =============================')
-        loss_train, metrics_train = mlp_learner.train_epoch(epoch)
-        print(f'============================= Epoch {epoch + 1}: Validation =============================')
-        loss_valid, metrics_valid = mlp_learner.valid_epoch(epoch)
+    # epochs = 10
+    # mlp_learner.train_loader = train_loader
+    # mlp_learner.valid_loader = valid_loader
+    # for epoch in range(epochs):
+    #     print(f'============================= Epoch {epoch + 1}: Training =============================')
+    #     loss_train, metrics_train = mlp_learner.train_epoch(epoch)
+    #     print(f'============================= Epoch {epoch + 1}: Validation =============================')
+    #     loss_valid, metrics_valid = mlp_learner.valid_epoch(epoch)
 
-    for i, (x_cat, x_cont, y) in enumerate(train_loader):
-        # send to device
-        x_cat, x_cont, y = x_cat.to(device), x_cont.to(device), y.to(device) 
+    # for i, (x_cat, x_cont, y) in enumerate(train_loader):
+    #     # send to device
+    #     x_cat, x_cont, y = x_cat.to(device), x_cont.to(device), y.to(device) 
 
-        # zero the parameter gradients
-        mlp_learner.optimizer.zero_grad()
+    #     # zero the parameter gradients
+    #     mlp_learner.optimizer.zero_grad()
 
-        # forward + backward + optimize
-        outputs = mlp_learner.model(x_cat, x_cont)
-        if mlp_learner.n_output == 2: # binary classification
-            # BCEWithLogitsLoss requires target as float, same size as outputs
-            y = y.float() 
-        else:
-            # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-            y = y.long().squeeze(-1) 
-        loss = mlp_learner.criterion(outputs, y)
-        loss.backward()
-        mlp_learner.optimizer.step()
+    #     # forward + backward + optimize
+    #     outputs = mlp_learner.model(x_cat, x_cont)
+    #     if mlp_learner.n_output == 2: # binary classification
+    #         # BCEWithLogitsLoss requires target as float, same size as outputs
+    #         y = y.float() 
+    #     else:
+    #         # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
+    #         y = y.long().squeeze(-1) 
+    #     loss = mlp_learner.criterion(outputs, y)
+    #     loss.backward()
+    #     mlp_learner.optimizer.step()
 
-        # metrics
-        metrics = mlp_learner._metrics(outputs, y)
+    #     # metrics
+    #     metrics = mlp_learner._metrics(outputs, y)
 
-        print(loss)
-        print(metrics)
+    #     print(loss)
+    #     print(metrics)
 
-    mlp_learner.model
-    mlp_learner.model.module.embedding_layers[0].weight
+    # mlp_learner.model
+    # mlp_learner.model.module.embedding_layers[0].weight
+
+    # from tmle_utils import get_probability_from_multilevel_prediction
+    # pred = mlp_learner.predict(fit_df, tmle._gs_measure_, 
+    #                            model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
+    # pred = np.concatenate(pred, 0)
+    # pred = get_probability_from_multilevel_prediction(pred, ydata) 
 
     # p=0.35
     # samples=100

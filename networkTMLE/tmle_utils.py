@@ -584,13 +584,12 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
     # Fitting model
     if print_every is not None:
         deep_learner.print_every = print_every
-    if custom_path is not None:
-        deep_learner.save_path = custom_path
-    best_model_path = deep_learner.fit(fit_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
+
+    best_model_path = deep_learner.fit(fit_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
 
     # Generating predictions
     pred_df = append_target_to_df(pdata_y, pdata, exposure)
-    pred = deep_learner.predict(pred_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
+    pred = deep_learner.predict(pred_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
     pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
     if n_output == 2: # binary classification with BCEloss
         pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
@@ -637,14 +636,14 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
     # Re-arrange data
     model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
                                                                                                                                              cat_vars, cont_vars, cat_unique_levels)
+    deep_learner_df = append_target_to_df(ydata, xdata, outcome)
     
     if not predict_with_best:
-        deep_learner_df = append_target_to_df(ydata, xdata, outcome)  
         # Fitting model
-        best_model_path = deep_learner.fit(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
+        best_model_path = deep_learner.fit(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
 
     # Generating predictions
-    pred = deep_learner.predict(xdata, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output=n_output, custom_path=custom_path)
+    pred = deep_learner.predict(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output=n_output, custom_path=custom_path)
     pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
     if n_output == 2: # binary classification with BCEloss
         pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
