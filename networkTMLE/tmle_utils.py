@@ -541,7 +541,7 @@ def select_pooled_sample_with_observed_data(target, pooled_data, observed_data):
 
 def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
                           cat_vars, cont_vars, cat_unique_levels, n_output, 
-                          custom_path, print_every):
+                          custom_path, **kwargs):
     """Internal function to fit custom_models for the exposure nuisance model and generate the predictions.
 
     Parameters
@@ -568,8 +568,8 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
         number of levels in output layer, 2 for binary, multilevel as specified
     custom_path: string
         path to saved best model, if different from model.save_path
-    print_every: int
-        print loss and acc per print_every steps
+    kwargs: dict
+        include all/partial init parameters for AbstractML model, key should be the same as the init parameter name
 
     Returns
     -------
@@ -582,8 +582,9 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
     fit_df = append_target_to_df(ydata, xdata, exposure)  
 
     # Fitting model
-    if print_every is not None:
-        deep_learner.print_every = print_every
+    ## update init parameters
+    for param, value in kwargs.items():
+        setattr(deep_learner, param, value)
 
     best_model_path = deep_learner.fit(fit_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
 

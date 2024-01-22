@@ -892,7 +892,9 @@ class NetworkTMLE:
                                                       verbose_label='Weight - Numerator',
                                                       store_model=False,
                                                       custom_path_prefix='num_',
-                                                      print_every=500)
+                                                      # kwargs
+                                                      batch_size=512,
+                                                      print_every=15)
 
         # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
         iptw = numerator / self._denominator_           # Divide numerator by denominator
@@ -986,7 +988,7 @@ class NetworkTMLE:
         return pd.concat(pooled_sample, axis=0, ignore_index=True)
 
     def _estimate_exposure_nuisance_(self, data_to_fit, data_to_predict, distribution, verbose_label, store_model, 
-                                     custom_path_prefix=None, print_every=None):
+                                     custom_path_prefix=None, **kwargs):
         """Unified function to estimate the numerator and denominator of the weights.
 
         Parameters
@@ -1005,6 +1007,11 @@ class NetworkTMLE:
         store_model : bool
             Identifies whether the nuisance models should be stored. This is to be set to True for the denominator
             models and False for the numerator models
+        custom_path_prefix: string
+            a prefix add to model path to distinguish between fitted models for numerator and denominator
+        kwargs: dict
+            include all/partial init parameters for AbstractML model, key should be the same as the init parameter name
+
 
         Returns
         -------
@@ -1041,7 +1048,7 @@ class NetworkTMLE:
                 pred = exposure_deep_learner(self._gi_custom_, 
                                              xdata, ydata, pdata, pdata_y, self.exposure,
                                              self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
-                                             custom_path, print_every)
+                                             custom_path, **kwargs)
             else:
                 xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit)       # Extract via patsy the data
                 pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict)   # Extract via patsy the data
@@ -1143,7 +1150,7 @@ class NetworkTMLE:
                     pred = exposure_deep_learner(self._gs_custom_, 
                                                  xdata, ydata, pdata, pdata_y, self._gs_measure_,
                                                  self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
-                                                 custom_path, print_every)
+                                                 custom_path, **kwargs)
                 else:
                     xdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
                                         data_to_fit)                          # ... from degree restricted

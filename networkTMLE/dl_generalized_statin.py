@@ -7,12 +7,18 @@ from sklearn.linear_model import LogisticRegression
 # from amonhen import NetworkTMLE
 # from amonhen.utils import probability_to_odds, odds_to_probability
 
-from mossspider import NetworkTMLE
-from mossspider.estimators.utils import probability_to_odds, odds_to_probability
+# from mossspider import NetworkTMLE
+# from mossspider.estimators.utils import probability_to_odds, odds_to_probability
+
+from tmle_dl import NetworkTMLE
+from tmle_utils import probability_to_odds, odds_to_probability
 
 from beowulf import load_uniform_statin, load_random_statin, truth_values, simulation_setup
 from beowulf.dgm import statin_dgm
 from beowulf.dgm.utils import network_to_df
+
+import torch
+from dl_trainer import MLP
 
 ############################################
 # Setting simulation parameters
@@ -33,12 +39,19 @@ sim_id = slurm_setup[4]
 seed_number = 12670567 + 10000000*int(sim_id)
 np.random.seed(seed_number)
 
+# random network with reproducibility
+# torch.manual_seed(17) 
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+
 
 # Loading correct  Network
 if network == "uniform":
-    G = load_uniform_statin(n=n_nodes)
+    # G = load_uniform_statin(n=n_nodes)
+    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_statin(n=n_nodes, return_cat_cont_split=True)
 if network == "random":
-    G = load_random_statin(n=n_nodes)
+    # G = load_random_statin(n=n_nodes)
+    G, cat_vars, cont_vars, cat_unique_levels = load_random_statin(n=n_nodes, return_cat_cont_split=True)
 
 # Marking if degree restriction is being applied
 if degree_restrict is not None:
@@ -127,13 +140,26 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 ########################################
 for i in range(n_mc):
     # Generating Data
-    H = statin_dgm(network=G, restricted=restrict)
+    # H = statin_dgm(network=G, restricted=restrict)
+    H, cat_vars, cont_vars, cat_unique_levels = statin_dgm(network=G, restricted=False,
+                                                           update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
     df = network_to_df(H)
     results.loc[i, 'inc_'+exposure] = np.mean(df[exposure])
     results.loc[i, 'inc_'+outcome] = np.mean(df[outcome])
 
     # Network TMLE
-    ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict)
+    # ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
+    #                     cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+    # use deep learner
+    ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',   
+                        cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                        use_deep_learner_A_i=True) 
+    # ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
+    #                     cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                     use_deep_learner_A_i_s=True) 
+    # ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
+    #                     cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                     use_deep_learner_outcome=True) 
     if model == 'np':
         if network == "uniform":
             if n_nodes == 500:
@@ -166,6 +192,22 @@ for i in range(n_mc):
     ntmle.exposure_model(gin_model)
     ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
     ntmle.outcome_model(qn_model, custom_model=q_estimator)
+
+    # use deep learner
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # device = 'cpu'
+    print(device)
+
+    mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                      epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # use_deep_learner_A_i=True
+    ntmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=mlp_learner) 
+    # # use_deep_learner_A_i_s=True
+    # ntmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
+    #                          measure='sum', distribution='poisson', custom_model=mlp_learner) 
+    # # use_deep_learner_outcome=True
+    # ntmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) 
+
     for p in prop_treated:  # loops through all treatment plans
         try:
             if shift:
