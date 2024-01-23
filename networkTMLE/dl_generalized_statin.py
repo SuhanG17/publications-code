@@ -40,9 +40,14 @@ seed_number = 12670567 + 10000000*int(sim_id)
 np.random.seed(seed_number)
 
 # random network with reproducibility
-# torch.manual_seed(17) 
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
+torch.manual_seed(17) 
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+# decide use deep learning in which nuisance model
+use_deep_learner_A_i = False
+use_deep_learner_A_i_s = True
+use_deep_learner_outcome = False
 
 
 # Loading correct  Network
@@ -148,18 +153,23 @@ for i in range(n_mc):
     results.loc[i, 'inc_'+outcome] = np.mean(df[outcome])
 
     # Network TMLE
-    # ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
-    #                     cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
-    # use deep learner
-    ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',   
-                        cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                        use_deep_learner_A_i=True) 
-    # ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
-    #                     cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-    #                     use_deep_learner_A_i_s=True) 
-    # ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
-    #                     cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-    #                     use_deep_learner_outcome=True) 
+    # use deep learner for given nuisance model
+    if use_deep_learner_A_i:
+        ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',   
+                            cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                            use_deep_learner_A_i=True) 
+    elif use_deep_learner_A_i_s:
+        ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
+                            cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                            use_deep_learner_A_i_s=True) 
+    elif use_deep_learner_outcome:
+        ntmle = NetworkTMLE(H, exposure='statin', outcome='cvd',
+                            cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                            use_deep_learner_outcome=True) 
+    else: # DO NOT use deep learner
+        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
+                        cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+        
     if model == 'np':
         if network == "uniform":
             if n_nodes == 500:
@@ -194,42 +204,59 @@ for i in range(n_mc):
     ntmle.outcome_model(qn_model, custom_model=q_estimator)
 
     # use deep learner
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    # device = 'cpu'
-    print(device)
+    if use_deep_learner_A_i or use_deep_learner_A_i_s or use_deep_learner_outcome:
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        # device = 'cpu'
+        print(device)
 
-    mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-                      epochs=10, print_every=5, device=device, save_path='./tmp.pth')
-    # use_deep_learner_A_i=True
-    ntmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=mlp_learner) 
-    # # use_deep_learner_A_i_s=True
-    # ntmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
-    #                          measure='sum', distribution='poisson', custom_model=mlp_learner) 
-    # # use_deep_learner_outcome=True
-    # ntmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) 
+        mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                        epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+        if use_deep_learner_A_i:
+            ntmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=mlp_learner) 
+        elif use_deep_learner_A_i_s:
+            ntmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
+                                    measure='sum', distribution='poisson', custom_model=mlp_learner) 
+        elif use_deep_learner_outcome:
+            ntmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) 
+        else:
+            raise ValueError("Deep learner should be used in given nuisance model, but not")
 
     for p in prop_treated:  # loops through all treatment plans
-        try:
-            if shift:
-                z = odds_to_probability(np.exp(log_odds + p))
-                ntmle.fit(p=z, bound=0.01)
-            else:
-                ntmle.fit(p=p, bound=0.01)
-            results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
-            results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
-            results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
-            results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
-            results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
-            results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
-            results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
-        except:
-            results.loc[i, 'bias_'+str(p)] = np.nan
-            results.loc[i, 'var_'+str(p)] = np.nan
-            results.loc[i, 'lcl_'+str(p)] = np.nan
-            results.loc[i, 'ucl_'+str(p)] = np.nan
-            results.loc[i, 'varl_'+str(p)] = np.nan
-            results.loc[i, 'lcll_'+str(p)] = np.nan
-            results.loc[i, 'ucll_'+str(p)] = np.nan
+        if shift:
+            z = odds_to_probability(np.exp(log_odds + p))
+            ntmle.fit(p=z, bound=0.01)
+        else:
+            ntmle.fit(p=p, bound=0.01)
+        results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
+        results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
+        results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
+        results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
+        results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
+        results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
+        results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
+
+    # for p in prop_treated:  # loops through all treatment plans
+    #     try:
+    #         if shift:
+    #             z = odds_to_probability(np.exp(log_odds + p))
+    #             ntmle.fit(p=z, bound=0.01)
+    #         else:
+    #             ntmle.fit(p=p, bound=0.01)
+    #         results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
+    #         results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
+    #         results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
+    #         results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
+    #         results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
+    #         results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
+    #         results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
+    #     except:
+    #         results.loc[i, 'bias_'+str(p)] = np.nan
+    #         results.loc[i, 'var_'+str(p)] = np.nan
+    #         results.loc[i, 'lcl_'+str(p)] = np.nan
+    #         results.loc[i, 'ucl_'+str(p)] = np.nan
+    #         results.loc[i, 'varl_'+str(p)] = np.nan
+    #         results.loc[i, 'lcll_'+str(p)] = np.nan
+    #         results.loc[i, 'ucll_'+str(p)] = np.nan
 
 
 ########################################

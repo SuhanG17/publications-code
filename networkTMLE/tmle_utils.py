@@ -531,8 +531,24 @@ def get_probability_from_multilevel_prediction(pred:np.ndarray, target:pd.core.s
 #         n_output = max_degree*max_level # maximum number of possible neighbors * maximum level = all possible categorical levels
 #     return n_output
 
+def check_pooled_sample_levels(target, pooled_data, observed_data):
+    ''' check if pooled_data contains all levels of target in observed_data, 
+    if not, return True regeneration flag; 
+    if true, return False regeneartion flag '''
+
+    pooled_data_levels = pd.unique(pooled_data[target])
+    observed_data_levels = pd.unique(observed_data[target])
+    print(f'pooled_data_levels: {pooled_data_levels}')
+    print(f'observed_data_levels: {observed_data_levels}')
+    if set(observed_data_levels).issubset(set(pooled_data_levels)):
+        return False # regenerate_flag=False
+    else:
+        return True # regenerate_flag=True
+
+
 def select_pooled_sample_with_observed_data(target, pooled_data, observed_data):
-    ''' select the pooled sample with observed data target level '''
+    ''' select the pooled sample with observed data target level'''
+
     pooled_subset = pooled_data.copy()
     observed_levels = observed_data[target]
     pooled_subset = pooled_subset.loc[pooled_subset[target].isin(observed_levels)]

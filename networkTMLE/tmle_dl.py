@@ -14,7 +14,7 @@ from tmle_utils import (network_to_df, fast_exp_map, exp_map_individual, tmle_un
                         probability_to_odds, odds_to_probability, bounding,
                         outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner, exposure_deep_learner, outcome_deep_learner,
                         targeting_step, create_threshold, create_categorical,
-                        select_pooled_sample_with_observed_data,
+                        check_pooled_sample_levels, select_pooled_sample_with_observed_data,
                         get_model_cat_cont_split_patsy_matrix, append_target_to_df, get_probability_from_multilevel_prediction)
 
 
@@ -884,6 +884,20 @@ class NetworkTMLE:
                                                  samples=samples,                          # ... for m samples
                                                  seed=seed)                                # ... with a provided seed
         pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
+
+        # ensure pooled data contains all exposure levels in observed data
+        if self.use_deep_learner_A_i_s:
+            regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
+            print(f'before while loop regenerate_flag: {regenerate_flag}')
+            while regenerate_flag:
+                print(f'regenerating pooled sample for {self._gs_measure_}')
+                pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
+                                                        samples=samples,                           # ... for m samples
+                                                        seed=seed)                                 # ... with a provided seed
+                pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
+                regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
+                print(f'in while loop regenerate_flag: {regenerate_flag}')
+                print()
 
         # Estimate the numerator using the pooled data
         numerator = self._estimate_exposure_nuisance_(data_to_fit=pooled_data_restricted.copy(),
