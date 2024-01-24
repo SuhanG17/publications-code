@@ -36,8 +36,8 @@ class DfDataset(Dataset):
         return np.asarray(self.df[self.target])[:, np.newaxis] #[num_samples, ] -> [num_samples, 1] 
     
     def __getitem__(self, idx):
-        return torch.from_numpy(self.x_cat[idx]).int(), torch.from_numpy(self.x_cont[idx]).float(), torch.from_numpy(self.y[idx]).float()
-        # shape: [num_cat_vars], [num_cont_vars], [1]
+        return torch.from_numpy(self.x_cat[idx]).int(), torch.from_numpy(self.x_cont[idx]).float(), torch.from_numpy(self.y[idx]).float(), idx
+        # shape: [num_cat_vars], [num_cont_vars], [1], [1]
 
     def __len__(self):
         return self.y.shape[0]

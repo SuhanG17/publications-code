@@ -1,33 +1,31 @@
 # from sys import argv
 import numpy as np
 import pandas as pd
+import networkx as nx
 from scipy.stats import logistic
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import Ridge
 
 # from amonhen import NetworkTMLE
-# from amonhen.utils import probability_to_odds, odds_to_probability
-
-# from mossspider import NetworkTMLE
-# from mossspider.estimators.utils import probability_to_odds, odds_to_probability
+# from amonhen.utils import probability_to_odds, odds_to_probability, fast_exp_map
 
 from tmle_dl import NetworkTMLE
-from tmle_utils import probability_to_odds, odds_to_probability
+from tmle_utils import probability_to_odds, odds_to_probability, fast_exp_map
 
-from beowulf import load_uniform_statin, load_random_statin, truth_values, simulation_setup
-from beowulf.dgm import statin_dgm
+from beowulf import load_uniform_diet, load_random_diet, truth_values, simulation_setup
+from beowulf.dgm import diet_dgm
 from beowulf.dgm.utils import network_to_df
 
 import torch
-from dl_trainer import MLP
+from dl_trainer import MLP, GCN
 
 ############################################
 # Setting simulation parameters
 ############################################
-# n_mc = 500
+n_mc = 500
 n_mc = 2
 
-exposure = "statin"
-outcome = "cvd"
+exposure = "diet"
+outcome = "bmi"
 
 ########################################
 # Running through logic from .sh script
@@ -52,11 +50,11 @@ use_deep_learner_outcome = True
 
 # Loading correct  Network
 if network == "uniform":
-    # G = load_uniform_statin(n=n_nodes)
-    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_statin(n=n_nodes, return_cat_cont_split=True)
+    # G = load_uniform_diet(n=n_nodes)
+    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_diet(n=n_nodes, return_cat_cont_split=True)
 if network == "random":
-    # G = load_random_statin(n=n_nodes)
-    G, cat_vars, cont_vars, cat_unique_levels = load_random_statin(n=n_nodes, return_cat_cont_split=True)
+    # G = load_random_diet(n=n_nodes)
+    G, cat_vars, cont_vars, cat_unique_levels = load_random_diet(n=n_nodes, return_cat_cont_split=True)
 
 # Marking if degree restriction is being applied
 if degree_restrict is not None:
@@ -66,30 +64,30 @@ else:
 
 # Setting up models
 independent = False
-distribution_gs = "poisson"
-measure_gs = "sum"
+distribution_gs = "threshold"
+measure_gs = "t3"
 q_estimator = None
 if model == "cc":
-    gin_model = "L + A_30 + R_1 + R_2 + R_3"
-    gsn_model = "statin + L + A_30 + R_1 + R_2 + R_3"
-    qn_model = "statin + statin_sum + A_sqrt + R + L"
+    gin_model = "B_30 + G:E + E_mean + G_mean + degree"
+    gsn_model = "diet + B_30 + G:E + E_mean + G_mean + degree"
+    qn_model = "diet + diet_t3 + B + G + E + E_sum + G_sum + B_mean_dist + degree"
 elif model == "cw":
-    gin_model = "L + A_30 + R_1 + R_2 + R_3"
-    gsn_model = "statin + L + A_30 + R_1 + R_2 + R_3"
-    qn_model = "statin + statin_sum + L + I(R**2)"
+    gin_model = "B_30 + G:E + E_mean + G_mean + degree"
+    gsn_model = "diet + B_30 + G:E + E_mean + G_mean + degree"
+    qn_model = "diet + diet_t3 + B + G + E + E_t3 + B_t30 + degree"
 elif model == "wc":
-    gin_model = "L + R"
-    gsn_model = "statin + L + R"
-    qn_model = "statin + statin_sum + A_sqrt + R + L"
+    gin_model = "B_30 + G:E + E_t3 + B_t30 + degree"
+    gsn_model = "diet + B_30 + G:E + E_t3 + B_t30 + degree"
+    qn_model = "diet + diet_t3 + B + G + E + E_sum + G_sum + B_mean_dist + degree"
 elif model == 'np':
-    gin_model = "L + A_30 + R_1 + R_2 + R_3 + C(R_1_sum_c) + C(R_2_sum_c) + C(R_3_sum_c) + A_mean_dist + L_mean_dist"
-    gsn_model = "statin + L + A_30 + R_1 + R_2 + R_3 + C(R_1_sum_c) + C(R_2_sum_c) + C(R_3_sum_c) + A_mean_dist + L_mean_dist"
-    qn_model = "statin + statin_sum + A_sqrt + R + L + R_mean_dist + A_mean_dist + L_mean_dist"
-    q_estimator = LogisticRegression(penalty='l2', max_iter=2000)
+    gin_model = "B_30 + G:E + C(E_sum_c) + C(G_sum_c) + B_mean_dist + degree"
+    gsn_model = "diet + B_30 + G:E + C(E_sum_c) + C(G_sum_c) + B_mean_dist + degree"
+    qn_model = "diet + diet_t3 + B + G + E + C(E_sum_c) + C(G_sum_c) + B_mean_dist + degree"
+    q_estimator = Ridge(max_iter=2000)
 elif model == 'ind':
     independent = True
-    gi_model = "L + A_30 + R_1 + R_2 + R_3"
-    qi_model = "statin + A_sqrt + R + L"
+    gi_model = "B_30 + G:E"
+    qi_model = "diet + B + G + E"
 
 # Determining if shift or absolute
 if shift:
@@ -97,12 +95,16 @@ if shift:
 
     # Generating probabilities (true) to assign
     data = network_to_df(G)
-    prob = logistic.cdf(-5.3 + 0.2 * data['L'] + 0.15 * (data['A'] - 30)
-                        + 0.4 * np.where(data['R_1'] == 1, 1, 0)
-                        + 0.9 * np.where(data['R_2'] == 2, 1, 0)
-                        + 1.5 * np.where(data['R_3'] == 3, 1, 0))
+    adj_matrix = nx.adjacency_matrix(G, weight=None)
+    data['E_mean'] = fast_exp_map(adj_matrix, np.array(data['E']), measure='mean')
+    data['G_mean'] = fast_exp_map(adj_matrix, np.array(data['G']), measure='mean')
+    data = pd.merge(data, pd.DataFrame.from_dict(dict(G.degree),
+                                                 orient='index').rename(columns={0: 'degree'}),
+                    how='left', left_index=True, right_index=True)
+    prob = logistic.cdf(-1.5 + 0.05*(data['B'] - 30) + 2*data['G']*data['E']
+                        + 1.*data['E_mean'] + 1.*data['G_mean']
+                        + 0.05*data['degree'])
     log_odds = np.log(probability_to_odds(prob))
-
 else:
     prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
                     0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
@@ -145,9 +147,7 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 ########################################
 for i in range(n_mc):
     # Generating Data
-    # H = statin_dgm(network=G, restricted=restrict)
-    H, cat_vars, cont_vars, cat_unique_levels = statin_dgm(network=G, restricted=False,
-                                                           update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+    H = diet_dgm(network=G, restricted=restrict)
     df = network_to_df(H)
     results.loc[i, 'inc_'+exposure] = np.mean(df[exposure])
     results.loc[i, 'inc_'+outcome] = np.mean(df[outcome])
@@ -155,53 +155,52 @@ for i in range(n_mc):
     # Network TMLE
     # use deep learner for given nuisance model
     if use_deep_learner_A_i:
-        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome,   
+        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
                             cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                            use_deep_learner_A_i=True) 
+                            use_deep_learner_A_i=True)
     elif use_deep_learner_A_i_s:
-        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome,
+        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
                             cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                            use_deep_learner_A_i_s=True) 
+                            use_deep_learner_A_i_s=True)
     elif use_deep_learner_outcome:
-        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome,
+        ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
                             cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                            use_deep_learner_outcome=True) 
+                            use_deep_learner_outcome=True)
     else: # DO NOT use deep learner
         ntmle = NetworkTMLE(H, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
-                        cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
-        
+                            cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
+
+    ntmle.define_threshold(variable='diet', threshold=3, definition='sum')
+    if model == "cw" or model == "wc":
+        ntmle.define_threshold(variable='E', threshold=3, definition='sum')
+        ntmle.define_threshold(variable='B', threshold=30, definition='mean')
     if model == 'np':
         if network == "uniform":
             if n_nodes == 500:
-                ntmle.define_category(variable='R_1_sum', bins=[0, 1, 5], labels=False)
-                ntmle.define_category(variable='R_2_sum', bins=[0, 1, 5], labels=False)
-                ntmle.define_category(variable='R_3_sum', bins=[0, 2], labels=False)
+                ntmle.define_category(variable='E_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                ntmle.define_category(variable='G_sum', bins=[0, 1, 2, 3, 6], labels=False)
             elif n_nodes == 1000:
-                ntmle.define_category(variable='R_1_sum', bins=[0, 1, 2, 5], labels=False)
-                ntmle.define_category(variable='R_2_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                ntmle.define_category(variable='R_3_sum', bins=[0, 1, 3], labels=False)
+                ntmle.define_category(variable='E_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                ntmle.define_category(variable='G_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
             else:
-                ntmle.define_category(variable='R_1_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                ntmle.define_category(variable='R_2_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-                ntmle.define_category(variable='R_3_sum', bins=[0, 1, 3, 6], labels=False)
+                ntmle.define_category(variable='E_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                ntmle.define_category(variable='G_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
         elif network == "random":
             if n_nodes == 500:
-                ntmle.define_category(variable='R_1_sum', bins=[0, 1, 2, 15], labels=False)
-                ntmle.define_category(variable='R_2_sum', bins=[0, 1, 2, 15], labels=False)
-                ntmle.define_category(variable='R_3_sum', bins=[0, 1, 15], labels=False)
+                ntmle.define_category(variable='E_sum', bins=[0, 1, 2, 5, 9, 15], labels=False)
+                ntmle.define_category(variable='G_sum', bins=[0, 2, 5, 9, 16, 24], labels=False)
             elif n_nodes == 1000:
-                ntmle.define_category(variable='R_1_sum', bins=[0, 1, 2, 3, 25], labels=False)
-                ntmle.define_category(variable='R_2_sum', bins=[0, 1, 2, 3, 6, 25], labels=False)
-                ntmle.define_category(variable='R_3_sum', bins=[0, 1, 2, 25], labels=False)
+                ntmle.define_category(variable='E_sum', bins=[0, 1, 2, 3, 4, 19], labels=False)
+                ntmle.define_category(variable='G_sum', bins=[0, 1, 2, 3, 4, 7, 26], labels=False)
             else:
-                ntmle.define_category(variable='R_1_sum', bins=[0, 1, 2, 3, 25], labels=False)
-                ntmle.define_category(variable='R_2_sum', bins=[0, 1, 2, 3, 4, 6, 25], labels=False)
-                ntmle.define_category(variable='R_3_sum', bins=[0, 1, 2, 25], labels=False)
+                ntmle.define_category(variable='E_sum', bins=[0, 1, 2, 3, 4, 5, 6, 25], labels=False)
+                ntmle.define_category(variable='G_sum', bins=[0, 1, 2, 3, 4, 5, 6, 9, 30], labels=False)
         else:
             raise ValueError("Invalid model-network combo")
     ntmle.exposure_model(gin_model)
     ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
-    ntmle.outcome_model(qn_model, custom_model=q_estimator)
+    ntmle.outcome_model(qn_model, custom_model=q_estimator, distribution='normal')
 
     # use deep learner
     if use_deep_learner_A_i or use_deep_learner_A_i_s or use_deep_learner_outcome:

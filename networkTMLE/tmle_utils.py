@@ -556,7 +556,7 @@ def select_pooled_sample_with_observed_data(target, pooled_data, observed_data):
 
 
 def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
-                          cat_vars, cont_vars, cat_unique_levels, n_output, 
+                          adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output, 
                           custom_path, **kwargs):
     """Internal function to fit custom_models for the exposure nuisance model and generate the predictions.
 
@@ -574,6 +574,8 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
         Truth for predictions, used to evaluate model performance
     exposure: string
         Exposure patamerter to predict
+    adj_matrix: SciPy sparse array
+        adjacency matrix for GCN model
     cat_vars: list
         list of categorical variables for df_restricted, not xdata
     cont_vars: list
@@ -602,11 +604,14 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
     for param, value in kwargs.items():
         setattr(deep_learner, param, value)
 
-    best_model_path = deep_learner.fit(fit_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
+    best_model_path = deep_learner.fit(fit_df, exposure, 
+                                       adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, 
+                                       n_output, custom_path=custom_path)
 
     # Generating predictions
     pred_df = append_target_to_df(pdata_y, pdata, exposure)
-    pred = deep_learner.predict(pred_df, exposure, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
+    pred = deep_learner.predict(pred_df, exposure, 
+                                adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
     pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
     if n_output == 2: # binary classification with BCEloss
         pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
@@ -616,7 +621,7 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
     return pred
 
 def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
-                         cat_vars, cont_vars, cat_unique_levels, n_output,
+                         adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output,
                          predict_with_best=False, custom_path=None):
     """Internal function to fit custom_models for the outcome nuisance model.
 
@@ -628,8 +633,10 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
         Covariate data to fit the model with
     ydata : pandas.core.series.Series
         Outcome data to fit the model with
-    exposure: string
-        Exposure patamerter to predict
+    outcome: string
+        outcome patamerter to predict
+    adj_matrix: SciPy sparse array
+        adjacency matrix for GCN model
     cat_vars: list
         list of categorical variables for df_restricted, not xdata
     cont_vars: list
@@ -657,10 +664,14 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
     
     if not predict_with_best:
         # Fitting model
-        best_model_path = deep_learner.fit(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, custom_path=custom_path)
+        best_model_path = deep_learner.fit(deep_learner_df, outcome, 
+                                           adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, 
+                                           n_output, custom_path=custom_path)
 
     # Generating predictions
-    pred = deep_learner.predict(deep_learner_df, outcome, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output=n_output, custom_path=custom_path)
+    pred = deep_learner.predict(deep_learner_df, outcome, 
+                                adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, 
+                                n_output=n_output, custom_path=custom_path)
     pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
     if n_output == 2: # binary classification with BCEloss
         pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]

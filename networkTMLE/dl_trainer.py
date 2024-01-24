@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from dl_dataset import DfDataset, get_dataloaders, get_kfold_split, get_kfold_dataloaders, get_predict_loader
-from dl_models import MLPModel
+from dl_models import MLPModel, GCNModel
 
 ######################## ml abstract trainer (Parent) ########################
 class AbstractML:
@@ -20,16 +20,19 @@ class AbstractML:
         self.print_every = print_every
         self.device = device
 
-    def fit(self, df, target, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, n_output=2, custom_path=None):
+    def fit(self, df, target, 
+            adj_matrix=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
+            n_output=2, custom_path=None):
         # initiate best model
         self.best_model = None
         self.best_loss = np.inf        
 
         # instantiate model
         self.n_output = n_output
-        self.model = self._build_model(model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output).to(self.device)
+        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output).to(self.device)
         self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
+        self._save_model(custom_path) # save the untrained model to custom_path
 
         # target is exposure for nuisance models, outcome for outcome model
         fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
@@ -88,14 +91,19 @@ class AbstractML:
                     self.best_loss = loss_valid
                     self.best_model = self.model
                     print('Best model updated')
-            
-        return self.save_path
 
-    def predict(self, df, target, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, n_output=2, custom_path=None):
+        if custom_path is None: 
+            return self.save_path
+        else:
+            return custom_path
+
+    def predict(self, df, target, 
+                adj_matrix=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
+                n_output=2, custom_path=None):
         print(f'============================= Predicting =============================')
         # instantiate model
         self.n_output = n_output
-        self.model = self._build_model(model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output).to(self.device)
+        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output).to(self.device)
         self._load_model(custom_path)
         self.criterion = self._loss_fn()
 
@@ -127,15 +135,16 @@ class AbstractML:
         cumu_loss = 0.0 
         cumu_metrics = 0.0
 
-        for i, (x_cat, x_cont, y) in enumerate(self.train_loader):
+        for i, (x_cat, x_cont, y, sample_idx) in enumerate(self.train_loader):
             # send to device
             x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
+            sample_idx = sample_idx.to(self.device)
 
             # zero the parameter gradients
             self.optimizer.zero_grad()
 
             # forward + backward + optimize
-            outputs = self.model(x_cat, x_cont)
+            outputs = self.model(x_cat, x_cont, sample_idx)
             if self.n_output == 2: # binary classification
                 # BCEWithLogitsLoss requires target as float, same size as outputs
                 y = y.float() 
@@ -175,10 +184,11 @@ class AbstractML:
         cumu_metrics = 0.0
 
         with torch.no_grad():
-            for i, (x_cat, x_cont, y) in enumerate(self.valid_loader):
+            for i, (x_cat, x_cont, y, sample_idx) in enumerate(self.valid_loader):
                 # send to device
                 x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
-                outputs = self.model(x_cat, x_cont)
+                sample_idx = sample_idx.to(self.device)
+                outputs = self.model(x_cat, x_cont, sample_idx)
                 if self.n_output == 2: # binary classification
                     # BCEWithLogitsLoss requires target as float, same size as outputs
                     y = y.float() 
@@ -210,10 +220,11 @@ class AbstractML:
         cumu_metrics = 0.0
 
         with torch.no_grad():
-            for i, (x_cat, x_cont, y) in enumerate(self.test_loader):
+            for i, (x_cat, x_cont, y, sample_idx) in enumerate(self.test_loader):
                 # send to device
                 x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
-                outputs = self.model(x_cat, x_cont)
+                sample_idx = sample_idx.to(self.device) 
+                outputs = self.model(x_cat, x_cont, sample_idx)
                 if return_pred:
                     if self.n_output == 2:
                         pred_list.append(torch.sigmoid(outputs).detach().to('cpu').numpy())
@@ -303,22 +314,42 @@ class AbstractML:
 class MLP(AbstractML):
     def __init__(self, split_ratio, batch_size, shuffle, n_splits, predict_all,
                  epochs, print_every, device='cpu', save_path='./'):
-        super().__init__(split_ratio, batch_size, shuffle, n_splits, predict_all,
+        super(MLP, self).__init__(split_ratio, batch_size, shuffle, n_splits, predict_all,
                          epochs, print_every, device, save_path)
     
     def _optimizer(self):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output):
+    def _build_model(self, adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output):
         n_cont = len(model_cont_vars)
-        net = MLPModel(model_cat_unique_levels, n_cont, n_output) 
+        net = MLPModel(adj_matrix, model_cat_unique_levels, n_cont, n_output) 
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             net = nn.DataParallel(net)
             net = net.to(self.device)
         return net
 
+
+######################## GCN model trainer (Child) ########################
+class GCN(AbstractML):
+    def __init__(self, split_ratio, batch_size, shuffle, n_splits, predict_all,
+                 epochs, print_every, device='cpu', save_path='./'):
+        super(GCN, self).__init__(split_ratio, batch_size, shuffle, n_splits, predict_all,
+                         epochs, print_every, device, save_path)
+
+    def _optimizer(self):
+        # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
+        return optim.Adam(self.model.parameters(), lr=0.0001)
+
+    def _build_model(self, adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output):
+        n_cont = len(model_cont_vars)
+        net = GCNModel(adj_matrix, model_cat_unique_levels, n_cont, n_output) 
+        if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
+            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            net = nn.DataParallel(net)
+            net = net.to(self.device)
+        return net
 
 if __name__ == '__main__':
 
@@ -360,9 +391,11 @@ if __name__ == '__main__':
     # device = 'cpu'
     print(device)
 
-    mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    # mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    gcn_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
                       epochs=10, print_every=5, device=device, save_path='./tmp.pth')
-    
+
     tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3")
     # tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=mlp_learner) # use_deep_learner_A_i=True
     tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
@@ -370,12 +403,17 @@ if __name__ == '__main__':
     # tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
     #                          measure='sum', distribution='poisson', custom_model=mlp_learner)  # use_deep_learner_A_i_s=True
     # tmle.outcome_model("statin + statin_sum + A_sqrt + R + L")
-    tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) # use_deep_learner_outcome=True
+    # tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) # use_deep_learner_outcome=True
+    tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=gcn_learner) # use_deep_learner_outcome=True
+
     tmle.fit(p=0.35, bound=0.01)
     tmle.summary()
 
 
     # # ############################# scratch #################################
+
+
+
     # # poisson model
     # import statsmodels.api as sm
     # import statsmodels.formula.api as smf
@@ -469,9 +507,10 @@ if __name__ == '__main__':
     #     print(f'============================= Epoch {epoch + 1}: Validation =============================')
     #     loss_valid, metrics_valid = mlp_learner.valid_epoch(epoch)
 
-    # for i, (x_cat, x_cont, y) in enumerate(train_loader):
+    # for i, (x_cat, x_cont, y, idx) in enumerate(train_loader):
     #     # send to device
     #     x_cat, x_cont, y = x_cat.to(device), x_cont.to(device), y.to(device) 
+
 
     #     # zero the parameter gradients
     #     mlp_learner.optimizer.zero_grad()
