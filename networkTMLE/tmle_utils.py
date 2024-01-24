@@ -412,7 +412,30 @@ def tmle_unit_unbound(ystar, mini, maxi):
     return ystar*(maxi - mini) + mini
 
 
-def create_threshold(data, variables, thresholds):
+# def create_threshold(data, variables, thresholds):
+#     """Internal function to create threshold variables given setup information.
+
+#     Parameters
+#     ----------
+#     data : dataframe
+#         Data set to calculate the measure for
+#     variables : list, set
+#         List of variable names to create the threshold variables for
+#     thresholds : list, set
+#         List of values (float or int) to create the thresholds at.
+
+#     Returns
+#     -------
+#     None
+#     """
+#     for v, t in zip(variables, thresholds):
+#         if type(t) is float:
+#             label = v + '_t' + str(int(t * 100))
+#         else:
+#             label = v + '_t' + str(t)
+#         data[label] = np.where(data[v] > t, 1, 0)
+
+def create_threshold(data, variables, thresholds, definitions):
     """Internal function to create threshold variables given setup information.
 
     Parameters
@@ -423,17 +446,19 @@ def create_threshold(data, variables, thresholds):
         List of variable names to create the threshold variables for
     thresholds : list, set
         List of values (float or int) to create the thresholds at.
+    definitions: list, set
+        list of summary definitions for each threshold variable
 
     Returns
     -------
     None
     """
-    for v, t in zip(variables, thresholds):
+    for v, t, d in zip(variables, thresholds, definitions):
         if type(t) is float:
             label = v + '_t' + str(int(t * 100))
         else:
             label = v + '_t' + str(t)
-        data[label] = np.where(data[v] > t, 1, 0)
+        data[label] = np.where(data[v + '_' + d] > t, 1, 0)
 
 
 def create_categorical(data, variables, bins, labels, verbose=False):
@@ -505,7 +530,7 @@ def get_model_cat_cont_split_patsy_matrix(patsy_matrix_dataframe, cat_vars, cont
                 cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
             elif ':' in var: # interaction term, treated as continuous even between two categorical variables
                 model_cont_vars.append(var)
-                cont_vars.appen(var)
+                cont_vars.append(var)
             else:
                 raise ValueError(f'{var} is a unseen type of variable, cannot be assigned to categorical or continuous')
     return model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels

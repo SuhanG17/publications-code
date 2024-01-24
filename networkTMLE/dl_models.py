@@ -8,6 +8,8 @@ class MLPModel(nn.Module):
     def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, n_output=2):
         super().__init__()
         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
+        self.n_cont = n_cont
+
         self.lin1 = nn.Linear(self.n_emb + n_cont, 16)
         self.lin2 = nn.Linear(16, 32)
         # if use BCEloss, number of output should be 1, i.e. the probability of getting category 1
@@ -33,18 +35,42 @@ class MLPModel(nn.Module):
         return embedding_layers, n_emb
     
     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
-        x = [e(x_cat[:, i]) for i, e in enumerate(self.embedding_layers)]
-        x = torch.cat(x, 1)
-        x = self.emb_drop(x)
-        x2 = self.bn1(x_cont)
-        x = torch.cat([x, x2], 1)
-        x = F.relu(self.lin1(x))
-        x = self.drops(x)
-        x = self.bn2(x)
-        x = F.relu(self.lin2(x))
-        x = self.drops(x)
-        x = self.bn3(x)
-        x = self.lin3(x)
+        if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
+            x1 = [e(x_cat[:, i]) for i, e in enumerate(self.embedding_layers)]
+            x1 = torch.cat(x1, 1)
+            x1 = self.emb_drop(x1)
+
+        if self.n_cont > 0: # if there are continuous variables to be encoded
+            x2 = self.bn1(x_cont)
+        
+        if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
+            x = torch.cat([x1, x2], 1)
+            x = F.relu(self.lin1(x))
+            x = self.drops(x)       
+            x = self.bn2(x)
+            x = F.relu(self.lin2(x))
+            x = self.drops(x)
+            x = self.bn3(x)
+            x = self.lin3(x)        
+        elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
+            x = F.relu(self.lin1(x1))
+            x = self.drops(x)       
+            x = self.bn2(x)
+            x = F.relu(self.lin2(x))
+            x = self.drops(x)
+            x = self.bn3(x)
+            x = self.lin3(x)
+        elif len(self.embedding_layers) == 0 and self.n_cont > 0:
+            x = F.relu(self.lin1(x2))
+            x = self.drops(x)       
+            x = self.bn2(x)
+            x = F.relu(self.lin2(x))
+            x = self.drops(x)
+            x = self.bn3(x)
+            x = self.lin3(x)
+        else:
+            raise ValueError('No variables to be encoded')
+    
         return x
 
 
@@ -112,16 +138,38 @@ class GCNModel(nn.Module):
         return adj_subset
 
     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
-        x = [e(x_cat[:, i]) for i, e in enumerate(self.embedding_layers)]
-        x = torch.cat(x, 1)
-        x = self.emb_drop(x)
-        x2 = self.bn1(x_cont)
-        x = torch.cat([x, x2], 1)
-        x = F.relu(self.lin1(x))
-        x = self.drops(x)
-        x = self.bn2(x)
-        adj_subset = self._get_adj_subset(self.adj_matrix, batched_nodes_indices)
-        x = self.gcn(x, adj_subset)
-        x = self.bn3(x)
-        x = self.lin3(x)
+        if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
+            x1 = [e(x_cat[:, i]) for i, e in enumerate(self.embedding_layers)]
+            x1 = torch.cat(x1, 1)
+            x1 = self.emb_drop(x1)
+        if self.n_cont > 0: # if there are continuous variables to be encoded
+            x2 = self.bn1(x_cont)
+
+        if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
+            x = torch.cat([x1, x2], 1)
+            x = F.relu(self.lin1(x))
+            x = self.drops(x)
+            x = self.bn2(x)
+            adj_subset = self._get_adj_subset(self.adj_matrix, batched_nodes_indices)
+            x = self.gcn(x, adj_subset)
+            x = self.bn3(x)
+            x = self.lin3(x)
+        elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
+            x = F.relu(self.lin1(x1))
+            x = self.drops(x)
+            x = self.bn2(x)
+            adj_subset = self._get_adj_subset(self.adj_matrix, batched_nodes_indices)
+            x = self.gcn(x, adj_subset)
+            x = self.bn3(x)
+            x = self.lin3(x)
+        elif len(self.embedding_layers) == 0 and self.n_cont > 0:
+            x = F.relu(self.lin1(x2))
+            x = self.drops(x)
+            x = self.bn2(x)
+            adj_subset = self._get_adj_subset(self.adj_matrix, batched_nodes_indices)
+            x = self.gcn(x, adj_subset)
+            x = self.bn3(x)
+            x = self.lin3(x)
+        else:
+            raise ValueError('No variables to be encoded')
         return x

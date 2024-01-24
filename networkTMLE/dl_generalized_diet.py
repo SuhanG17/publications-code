@@ -21,7 +21,7 @@ from dl_trainer import MLP, GCN
 ############################################
 # Setting simulation parameters
 ############################################
-n_mc = 500
+# n_mc = 500
 n_mc = 2
 
 exposure = "diet"
@@ -47,6 +47,8 @@ use_deep_learner_A_i = False
 use_deep_learner_A_i_s = False
 use_deep_learner_outcome = True
 
+# decide which model to use
+deep_learner_type = 'mlp' # 'mlp' or 'gcn'
 
 # Loading correct  Network
 if network == "uniform":
@@ -147,7 +149,9 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 ########################################
 for i in range(n_mc):
     # Generating Data
-    H = diet_dgm(network=G, restricted=restrict)
+    # H = diet_dgm(network=G, restricted=restrict)
+    H, cat_vars, cont_vars, cat_unique_levels = diet_dgm(network=G, restricted=restrict, 
+                                                         update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
     df = network_to_df(H)
     results.loc[i, 'inc_'+exposure] = np.mean(df[exposure])
     results.loc[i, 'inc_'+outcome] = np.mean(df[outcome])
@@ -208,14 +212,21 @@ for i in range(n_mc):
         # device = 'cpu'
         print(device)
 
-        mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-                        epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+        if deep_learner_type == 'mlp':
+            deep_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                            epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+        elif deep_learner_type == 'gcn':
+            deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                            epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+        else:
+            raise NotImplementedError("Deep learner type not implemented")
+        
         if use_deep_learner_A_i:
-            ntmle.exposure_model(gin_model, custom_model=mlp_learner) 
+            ntmle.exposure_model(gin_model, custom_model=deep_learner) 
         elif use_deep_learner_A_i_s:
-            ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=mlp_learner) 
+            ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=deep_learner) 
         elif use_deep_learner_outcome:
-            ntmle.outcome_model(qn_model, custom_model=mlp_learner) 
+            ntmle.outcome_model(qn_model, custom_model=deep_learner) 
         else:
             raise ValueError("Deep learner should be used in given nuisance model, but not")
 

@@ -364,7 +364,7 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # Statin-ASCVD -- DGM: test run
+    ######################################### Statin-ASCVD -- DGM: test run #########################################
 
     # Loading uniform network with statin W
     G, cat_vars, cont_vars, cat_unique_levels = load_uniform_statin(n=500, return_cat_cont_split=True)
@@ -384,34 +384,115 @@ if __name__ == '__main__':
                        use_deep_learner_outcome=True) 
 
     
-    # instantiation of MLP model
+    # instantiation of deep learning model
     # 5 fold cross validation 
     # device
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     # device = 'cpu'
     print(device)
 
-    # mlp_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    # deep_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
     #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
-    gcn_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
                       epochs=10, print_every=5, device=device, save_path='./tmp.pth')
 
     tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3")
-    # tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=mlp_learner) # use_deep_learner_A_i=True
+    # tmle.exposure_model("L + A_30 + R_1 + R_2 + R_3", custom_model=deep_learner) # use_deep_learner_A_i=True
     tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
                             measure='sum', distribution='poisson')  # Applying a Poisson model
     # tmle.exposure_map_model("statin + L + A_30 + R_1 + R_2 + R_3",
-    #                          measure='sum', distribution='poisson', custom_model=mlp_learner)  # use_deep_learner_A_i_s=True
+    #                          measure='sum', distribution='poisson', custom_model=deep_learner)  # use_deep_learner_A_i_s=True
     # tmle.outcome_model("statin + statin_sum + A_sqrt + R + L")
-    # tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=mlp_learner) # use_deep_learner_outcome=True
-    tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=gcn_learner) # use_deep_learner_outcome=True
+    tmle.outcome_model("statin + statin_sum + A_sqrt + R + L", custom_model=deep_learner) # use_deep_learner_outcome=True
 
     tmle.fit(p=0.35, bound=0.01)
     tmle.summary()
 
+    ######################################### diet-bmi -- DGM: test run #########################################
+    # loading uniform network with diet W
+    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_diet(n=500, return_cat_cont_split=True)
+    # Simulation single instance of exposure and outcome
+    H, cat_vars, cont_vars, cat_unique_levels = diet_dgm(network=G, restricted=False, 
+                                                        update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+    
+    # temporary modification to cat/var split
+    cat_vars.remove('B_30')
+    cont_vars.append('B_30')
+    cat_unique_levels.pop('B_30')
 
+    # network-TMLE applies to generated data
+    tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
+                       cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                       use_deep_learner_A_i=True)
+    # tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_A_i_s=True)
+    # tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_outcome=True)
+    
+    # add threshold measure
+    tmle.define_threshold(variable='diet', threshold=3, definition='sum')
+
+    # instantiation of deep learning model
+    # 5 fold cross validation 
+    # device
+    # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = 'cpu'
+    print(device)
+
+    deep_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                      epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+
+    tmle.exposure_model("B_30 + G:E + E_mean")
+    # tmle.exposure_model("B_30 + G:E + E_mean", custom_model=deep_learner) # use_deep_learner_A_i=True
+    tmle.exposure_map_model("diet + B_30 + G:E + E_mean", measure='t3', distribution='threshold')
+    # tmle.exposure_map_model("diet + B_30 + G:E + E_mean", measure='t3',
+    #                         distribution='threshold', custom_model=deep_learner)  # use_deep_learner_A_i_s=True
+    tmle.outcome_model("diet + diet_t3 + B + G + E + E_sum + B_mean_dist", distribution='normal')
+    # tmle.outcome_model("diet + diet_t3 + B + G + E + E_sum + B_mean_dist", custom_model=deep_learner) # use_deep_learner_outcome=True
+    tmle.fit(p=0.65, bound=0.01)
+    tmle.summary()
+
+   
+   
     # # ############################# scratch #################################
+    tmle.df_restricted.columns
+    tmle.df_restricted['diet_t3']
+    tmle.df_restricted['diet_t3'].value_counts()
+    tmle.df_restricted['bmi']
 
+    cat_vars
+    cont_vars
+    cat_unique_levels
+
+    import patsy
+    data_to_fit = tmle.df_restricted.copy()
+    data_to_predict = tmle.df_restricted.copy()
+
+    xdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
+    ydata = data_to_fit[tmle.exposure] 
+    n_output = pd.unique(ydata).shape[0]
+    print(f'gi_model: n_output = {n_output} for target variable {tmle.exposure}')
+
+    pdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
+    pdata_y = data_to_predict[tmle.exposure]
+    custom_path = 'denom_' + 'A_i_' + tmle.exposure  + '.pth'
+
+    from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df 
+    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+                                                                                                                                             cat_vars, cont_vars, cat_unique_levels)
+    fit_df = append_target_to_df(ydata, xdata, tmle.exposure)
+
+    fit_df
+    model_cat_vars
+    model_cont_vars
+    model_cat_unique_levels
+    fit_df['B_30'].value_counts()
+    pd.unique(fit_df['B_30'])
+    pd.unique(tmle.df_restricted['B'])
 
 
     # # poisson model

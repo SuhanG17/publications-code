@@ -461,14 +461,23 @@ class NetworkTMLE:
                 self._Qinit_ = outcome_learner_predict(ml_model_fit=self._q_custom_,   # Fit custom_model
                                                     xdata=np.asarray(data))         # Observed X data
 
-        # Ensures all predicted values are bounded
+        # Ensures all predicted values are bounded: 
+        # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
         if self._continuous_outcome:
-            self._Qinit_ = np.where(self._Qinit_ < self._continuous_min_,          # When lower than lower bound
-                                    self._continuous_min_,                         # ... set to lower bound
+            self._Qinit_ = np.where(self._Qinit_ < 0.,          # When lower than lower bound
+                                    0 + self._cb_,                         # ... set to lower bound
                                     self._Qinit_)                                  # ... otherwise keep
-            self._Qinit_ = np.where(self._Qinit_ > self._continuous_max_,          # When above the upper bound
-                                    self._continuous_max_,                         # ... set to upper bound
+            self._Qinit_ = np.where(self._Qinit_ > 1.,          # When above the upper bound
+                                    1 - self._cb_,                         # ... set to upper bound
                                     self._Qinit_)                                  # ... otherwise keep
+
+        # if self._continuous_outcome:
+        #     self._Qinit_ = np.where(self._Qinit_ < self._continuous_min_,          # When lower than lower bound
+        #                             self._continuous_min_,                         # ... set to lower bound
+        #                             self._Qinit_)                                  # ... otherwise keep
+        #     self._Qinit_ = np.where(self._Qinit_ > self._continuous_max_,          # When above the upper bound
+        #                             self._continuous_max_,                         # ... set to upper bound
+        #                             self._Qinit_)                                  # ... otherwise keep
 
     def fit(self, p, samples=100, bound=None, seed=None):
         """Estimation procedure under a specified treatment plan.
@@ -560,9 +569,14 @@ class NetworkTMLE:
                                                 xdata=np.asarray(d))              # ... for the extracted data
 
         # Ensure all predicted values are bounded properly for continuous
+        # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
         if self._continuous_outcome:
-            y_star = np.where(y_star < self._continuous_min_, self._continuous_min_, y_star)
-            y_star = np.where(y_star > self._continuous_max_, self._continuous_max_, y_star)
+            y_star = np.where(y_star < 0., 0. + self._cb_, y_star)
+            y_star = np.where(y_star > 1., 1. - self._cb_, y_star)     
+
+        # if self._continuous_outcome:
+        #     y_star = np.where(y_star < self._continuous_min_, self._continuous_min_, y_star)
+        #     y_star = np.where(y_star > self._continuous_max_, self._continuous_max_, y_star)
 
         # Updating predictions via intercept from targeting step
         logit_qstar = np.log(probability_to_odds(y_star)) + epsilon            # NOTE: needs to be logit(Y^*) + e
@@ -797,7 +811,24 @@ class NetworkTMLE:
 
         return ax
 
-    def define_threshold(self, variable, threshold):
+    # def define_threshold(self, variable, threshold):
+    #     """Function arbitrarily allows for multiple different defined thresholds
+
+    #     Parameters
+    #     ----------
+    #     variable : str
+    #         Variable to generate categories for
+    #     threshold : int, float
+    #         Threshold to use as the cutpoint.
+    #     """
+    #     self._thresholds_any_ = True                    # Update logic to understand at least one threshold exists
+    #     self._thresholds_.append(threshold)             # Add the threshold to the list to look at
+    #     self._thresholds_variables_.append(variable)    # Add the variable to the list to make thresholds for
+    #     create_threshold(self.df_restricted,            # Create the desired threshold variable
+    #                      variables=[variable],          # ... for the specified variable
+    #                      thresholds=[threshold])        # ... at the desired threshold
+
+    def define_threshold(self, variable, threshold, definition):
         """Function arbitrarily allows for multiple different defined thresholds
 
         Parameters
@@ -806,13 +837,17 @@ class NetworkTMLE:
             Variable to generate categories for
         threshold : int, float
             Threshold to use as the cutpoint.
+        definition: str
+            ??
         """
         self._thresholds_any_ = True                    # Update logic to understand at least one threshold exists
         self._thresholds_.append(threshold)             # Add the threshold to the list to look at
         self._thresholds_variables_.append(variable)    # Add the variable to the list to make thresholds for
+        self._thresholds_def_.append(definition)
         create_threshold(self.df_restricted,            # Create the desired threshold variable
                          variables=[variable],          # ... for the specified variable
-                         thresholds=[threshold])        # ... at the desired threshold
+                         thresholds=[threshold],        # ... at the desired threshold
+                         definitions=[definition])        
 
     def define_category(self, variable, bins, labels=False):
         """Function arbitrarily allows for multiple different defined thresholds
