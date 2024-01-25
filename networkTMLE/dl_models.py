@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 ######################## MLP model ########################
 class MLPModel(nn.Module):
-    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, n_output=2):
+    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, n_output=2, _continuous_outcome=False):
         super().__init__()
         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
         self.n_cont = n_cont
@@ -14,7 +14,7 @@ class MLPModel(nn.Module):
         self.lin2 = nn.Linear(16, 32)
         # if use BCEloss, number of output should be 1, i.e. the probability of getting category 1
         # else number of output should be as specified
-        if n_output == 2:
+        if n_output == 2 or _continuous_outcome:
             self.lin3 = nn.Linear(32, 1) 
         else:
             self.lin3 = nn.Linear(32, n_output)
@@ -100,14 +100,14 @@ class GCNLayer(nn.Module):
 
 
 class GCNModel(nn.Module):
-    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, n_output=2):
+    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, n_output=2, _continuous_outcome=False):
         super(GCNModel, self).__init__()
         self.adj_matrix = adj_matrix
 
         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
         self.lin1 = nn.Linear(self.n_emb + n_cont, 16)
         self.gcn = GCNLayer(16, 32)
-        if n_output == 2:
+        if n_output == 2 or _continuous_outcome:
             self.lin3 = nn.Linear(32, 1) 
         else:
             self.lin3 = nn.Linear(32, n_output)

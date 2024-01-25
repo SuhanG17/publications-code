@@ -258,15 +258,14 @@ def load_uniform_diet(n=500, return_cat_cont_split=False):
         graph.nodes[n]['P'] = int(attrs.loc[attrs['id'] == n, 'P'].values)
     
     if return_cat_cont_split:
-        cat_vars = ['G', 'B', 'B_30', 'E', 'P']
-        cont_vars = []
+        cat_vars = ['G', 'B', 'E', 'P']
+        # set B_30 as a continuous variable, even though it is categorical.
+        # Because it contains negative values which cannot be used as input to embedding layers
+        cont_vars = ['B_30']
         cat_unique_levels = {}
         for var in cat_vars:
-            if var == 'B_30':
-                cat_unique_levels[var] = pd.unique(attrs['B'].astype('int') - 30).max() + 1
-            else:
-                # record number of levels(vocabulary size) for each categorical variable, +1 to include 0
-                cat_unique_levels[var] = pd.unique(attrs[var].astype('int')).max() + 1
+            # record number of levels(vocabulary size) for each categorical variable, +1 to include 0
+            cat_unique_levels[var] = pd.unique(attrs[var].astype('int')).max() + 1
         return nx.convert_node_labels_to_integers(graph), cat_vars, cont_vars, cat_unique_levels
     else:
         return nx.convert_node_labels_to_integers(graph)
@@ -293,15 +292,14 @@ def load_random_diet(n=500, return_cat_cont_split=False):
         graph.nodes[n]['P'] = int(attrs.loc[attrs['id'] == n, 'P'].values)
 
     if return_cat_cont_split:
-        cat_vars = ['G', 'B', 'B_30', 'E', 'P']
-        cont_vars = []
+        cat_vars = ['G', 'B', 'E', 'P']
+        # set B_30 as a continuous variable, even though it is categorical.
+        # Because it contains negative values which cannot be used as input to embedding layers
+        cont_vars = ['B_30']
         cat_unique_levels = {}
         for var in cat_vars:
-            if var == 'B_30':
-                cat_unique_levels[var] = pd.unique(attrs['B'].astype('int') - 30).max() + 1
-            else:
-                # record number of levels(vocabulary size) for each categorical variable, +1 to include 0
-                cat_unique_levels[var] = pd.unique(attrs[var].astype('int')).max() + 1
+            # record number of levels(vocabulary size) for each categorical variable, +1 to include 0
+            cat_unique_levels[var] = pd.unique(attrs[var].astype('int')).max() + 1
         return nx.convert_node_labels_to_integers(graph), cat_vars, cont_vars, cat_unique_levels
     else:
         return nx.convert_node_labels_to_integers(graph)

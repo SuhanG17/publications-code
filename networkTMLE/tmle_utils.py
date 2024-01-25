@@ -520,14 +520,14 @@ def get_model_cat_cont_split_patsy_matrix(patsy_matrix_dataframe, cat_vars, cont
                 cont_vars.append(var)
             elif 'C()' in var: # categorical term
                 model_cat_vars.append(var)
-                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
+                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var].astype('int')).max() + 1
                 cat_vars.append(var)
-                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
+                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var].astype('int')).max() + 1
             elif '_t' in var: # threshold term, treated as categorical
                 model_cat_vars.append(var)
-                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1 
+                model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var].astype('int')).max() + 1 
                 cat_vars.append(var)
-                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var]).max() + 1
+                cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var].astype('int')).max() + 1
             elif ':' in var: # interaction term, treated as continuous even between two categorical variables
                 model_cont_vars.append(var)
                 cont_vars.append(var)
@@ -646,7 +646,7 @@ def exposure_deep_learner(deep_learner, xdata, ydata, pdata, pdata_y, exposure,
     return pred
 
 def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
-                         adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output,
+                         adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output, _continuous_outcome,
                          predict_with_best=False, custom_path=None):
     """Internal function to fit custom_models for the outcome nuisance model.
 
@@ -670,6 +670,8 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
         dictionary of categorical variables and their unique levels for df_restricted, not xdata
     n_output: int
         number of levels in output layer, 2 for binary, multilevel as specified 
+    _continuous_outcome: bool
+        if the outcome is continuous, default is False
     predict_with_best: bool
         if use the best model to predict, default is False
     custom_path: string
@@ -691,14 +693,14 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
         # Fitting model
         best_model_path = deep_learner.fit(deep_learner_df, outcome, 
                                            adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, 
-                                           n_output, custom_path=custom_path)
+                                           n_output, _continuous_outcome, custom_path=custom_path)
 
     # Generating predictions
     pred = deep_learner.predict(deep_learner_df, outcome, 
                                 adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, 
-                                n_output=n_output, custom_path=custom_path)
+                                n_output=n_output, _continuous_outcome=_continuous_outcome, custom_path=custom_path)
     pred = np.concatenate(pred, 0) # [[batch_size, n_output], [batch_size, n_output] ...] -> [sample_size, n_output]
-    if n_output == 2: # binary classification with BCEloss
+    if n_output == 2 or _continuous_outcome: # binary classification with BCEloss / continuous outcome
         pred = pred.squeeze(-1) # [sample_size, 1] -> [sample_size]
     else:
         pred = get_probability_from_multilevel_prediction(pred, ydata) 

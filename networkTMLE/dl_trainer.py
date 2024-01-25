@@ -22,20 +22,28 @@ class AbstractML:
 
     def fit(self, df, target, 
             adj_matrix=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
-            n_output=2, custom_path=None):
+            n_output=2, _continuous_outcome=False, custom_path=None):
         # initiate best model
         self.best_model = None
         self.best_loss = np.inf        
 
         # instantiate model
         self.n_output = n_output
-        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output).to(self.device)
+        self._continuous_outcome = _continuous_outcome
+
+        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, _continuous_outcome).to(self.device)
         self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
         self._save_model(custom_path) # save the untrained model to custom_path
 
         # target is exposure for nuisance models, outcome for outcome model
-        fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
+        if self._continuous_outcome:
+            fold_record = {'train_loss': [], 'val_loss': [],
+                           'train_mae':  [], 'val_mae':  [],
+                           'train_mse':  [], 'val_mse':  [],
+                           'train_rmse': [], 'val_rmse': []}
+        else:
+            fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
 
         if self.n_splits > 1: # Kfold cross validation is used
             splits, dset = self._data_preprocess(df, target,
@@ -53,10 +61,17 @@ class AbstractML:
                     print(f'============================= Epoch {epoch + 1}: Validation =============================')
                     loss_valid, metrics_valid = self.valid_epoch(epoch)
 
-                    fold_record['train_loss'].append(loss_train)
-                    fold_record['val_loss'].append(loss_valid)
-                    fold_record['train_acc'].append(metrics_train)
-                    fold_record['val_acc'].append(metrics_valid)
+                    if self._continuous_outcome:
+                        fold_record['train_loss'].append(loss_train)
+                        fold_record['val_loss'].append(loss_valid)
+                        for (metric_name_train, metric_value_train), (metric_name_val, metirc_value_val) in zip(metrics_train.items(), metrics_valid.items()):
+                            fold_record['train_' + metric_name_train].append(metric_value_train)
+                            fold_record['val_' + metric_name_val].append(metirc_value_val)
+                    else:
+                        fold_record['train_loss'].append(loss_train)
+                        fold_record['val_loss'].append(loss_valid)
+                        fold_record['train_acc'].append(metrics_train)
+                        fold_record['val_acc'].append(metrics_valid)
 
                     # update best loss
                     if loss_valid < self.best_loss:
@@ -65,13 +80,27 @@ class AbstractML:
                         self.best_model = self.model
                         print('Best model updated')
             
-            avg_train_loss = np.mean(fold_record['train_loss'])
-            avg_val_loss = np.mean(fold_record['val_loss'])
-            avg_train_acc = np.mean(fold_record['train_acc'])
-            avg_val_acc = np.mean(fold_record['val_acc'])
+            if self._continuous_outcome:
+                avg_train_loss = np.mean(fold_record['train_loss'])
+                avg_val_loss = np.mean(fold_record['val_loss'])
+                avg_metrics_train = {}
+                avg_metrics_val = {}
+                for metric_name in ['mae', 'mse', 'rmse']:
+                    avg_metrics_train['train_' + metric_name] = np.mean(fold_record['train_' + metric_name])
+                    avg_metrics_val['val_' + metric_name] = np.mean(fold_record['val_' + metric_name])
+                
+                print(f'Performance of {self.n_splits} fold cross validation')
+                print(f'Average Training Loss: {avg_train_loss:.4f} \t Average Val Loss: {avg_val_loss:.4f}')
+                for metric_name in ['mae', 'mse', 'rmse']:
+                    print(f'Average Training {metric_name}: {avg_metrics_train["train_" + metric_name]:.3f} \t Average Val {metric_name}: {avg_metrics_val["val_" + metric_name]:.3f}')
+            else:
+                avg_train_loss = np.mean(fold_record['train_loss'])
+                avg_val_loss = np.mean(fold_record['val_loss'])
+                avg_train_acc = np.mean(fold_record['train_acc'])
+                avg_val_acc = np.mean(fold_record['val_acc'])
 
-            print(f'Performance of {self.n_splits} fold cross validation')
-            print(f'Average Training Loss: {avg_train_loss:.4f} \t Average Val Loss: {avg_val_loss:.4f} \t Average Training Acc: {avg_train_acc:.3f} \t Average Test Acc: {avg_val_acc:.3f}')  
+                print(f'Performance of {self.n_splits} fold cross validation')
+                print(f'Average Training Loss: {avg_train_loss:.4f} \t Average Val Loss: {avg_val_loss:.4f} \t Average Training Acc: {avg_train_acc:.3f} \t Average Test Acc: {avg_val_acc:.3f}')  
         else:
             self.train_loader, self.valid_loader, self.test_loader = self._data_preprocess(df, target,
                                                                                            model_cat_vars=model_cat_vars, 
@@ -99,11 +128,13 @@ class AbstractML:
 
     def predict(self, df, target, 
                 adj_matrix=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
-                n_output=2, custom_path=None):
+                n_output=2, _continuous_outcome=False, custom_path=None):
         print(f'============================= Predicting =============================')
         # instantiate model
         self.n_output = n_output
-        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output).to(self.device)
+        self._continuous_outcome = _continuous_outcome
+
+        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, _continuous_outcome).to(self.device)
         self._load_model(custom_path)
         self.criterion = self._loss_fn()
 
@@ -130,10 +161,16 @@ class AbstractML:
 
         # record loss and metrics for every print_every mini-batches
         running_loss = 0.0 
-        running_metrics = 0.0
+        if self._continuous_outcome:
+            running_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
+        else:
+            running_metrics = 0.0
         # record loss and metrics for the whole epoch
         cumu_loss = 0.0 
-        cumu_metrics = 0.0
+        if self._continuous_outcome:
+            cumu_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
+        else:
+            cumu_metrics = 0.0
 
         for i, (x_cat, x_cont, y, sample_idx) in enumerate(self.train_loader):
             # send to device
@@ -145,12 +182,15 @@ class AbstractML:
 
             # forward + backward + optimize
             outputs = self.model(x_cat, x_cont, sample_idx)
-            if self.n_output == 2: # binary classification
-                # BCEWithLogitsLoss requires target as float, same size as outputs
-                y = y.float() 
+            if self._continuous_outcome:
+                y = y.float() # shape [batch_size] -> [batch_size, 1] for l1_loss
             else:
-                # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-                y = y.long().squeeze(-1) 
+                if self.n_output == 2: # binary classification
+                    # BCEWithLogitsLoss requires target as float, same size as outputs
+                    y = y.float() 
+                else:
+                    # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
+                    y = y.long().squeeze(-1) 
             loss = self.criterion(outputs, y)
             loss.backward()
             self.optimizer.step()
@@ -162,26 +202,43 @@ class AbstractML:
             running_loss += loss.item()
             cumu_loss += loss.item()
             
-            running_metrics += metrics
-            cumu_metrics += metrics
+            if self._continuous_outcome:
+                for metric_name, metric_value in metrics.items():
+                    running_metrics[metric_name] += metric_value
+                    cumu_metrics[metric_name] += metric_value
+            else:
+                running_metrics += metrics
+                cumu_metrics += metrics
 
             if i % self.print_every == self.print_every - 1:    # print every mini-batches
-                print(f'[{epoch + 1}, {i + 1:5d}] | loss: {running_loss / self.print_every:.3f} | acc: {running_metrics / self.print_every:.3f}')
-                running_loss = 0.0
-                running_metrics = 0.0              
+                if self._continuous_outcome:
+                    report_string = f'[{epoch + 1}, {i + 1:5d}] | loss: {running_loss / self.print_every:.3f}' 
+                    for metric_name, metric_value in running_metrics.items():
+                        report_string += f' | {metric_name}: {metric_value / self.print_every:.3f}'
+                    print(report_string)
 
-                # for metric_name, metric_value in running_metrics.items():
-                #     print(f'[{epoch + 1}, {i + 1:5d}] {metric_name}: {metric_value / self.print_every:.3f}')
-                # running_metrics = {}
-        
-        return cumu_loss / len(self.train_loader), cumu_metrics / len(self.train_loader)
+                    running_loss = 0.0
+                    running_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
+                else:
+                    print(f'[{epoch + 1}, {i + 1:5d}] | loss: {running_loss / self.print_every:.3f} | acc: {running_metrics / self.print_every:.3f}')
+                    running_loss = 0.0
+                    running_metrics = 0.0              
+        if self._continuous_outcome:
+            for metric_name, metric_value in cumu_metrics.items():
+                cumu_metrics[metric_name] = metric_value / len(self.train_loader)
+            return cumu_loss / len(self.train_loader), cumu_metrics
+        else:
+            return cumu_loss / len(self.train_loader), cumu_metrics / len(self.train_loader)
 
     def valid_epoch(self, epoch): 
         self.model.eval() # turn on eval mode
 
         # record loss and metrics for the whole epoch
         cumu_loss = 0.0 
-        cumu_metrics = 0.0
+        if self._continuous_outcome:
+            cumu_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
+        else:
+            cumu_metrics = 0.0
 
         with torch.no_grad():
             for i, (x_cat, x_cont, y, sample_idx) in enumerate(self.valid_loader):
@@ -189,25 +246,41 @@ class AbstractML:
                 x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
                 sample_idx = sample_idx.to(self.device)
                 outputs = self.model(x_cat, x_cont, sample_idx)
-                if self.n_output == 2: # binary classification
-                    # BCEWithLogitsLoss requires target as float, same size as outputs
-                    y = y.float() 
+                if self._continuous_outcome:
+                    y = y.float() # shape [batch_size] -> [batch_size, 1] for l1_loss
                 else:
-                    # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-                    y = y.long().squeeze(-1) 
+                    if self.n_output == 2: # binary classification
+                        # BCEWithLogitsLoss requires target as float, same size as outputs
+                        y = y.float() 
+                    else:
+                        # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
+                        y = y.long().squeeze(-1) 
                 loss = self.criterion(outputs, y)
                 metrics = self._metrics(outputs, y)
 
                 # print statistics
                 cumu_loss += loss.item()
-                cumu_metrics += metrics
 
-            print(f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(self.valid_loader):.3f} | acc: {cumu_metrics / len(self.valid_loader):.3f}')
-            # for metric_name, metric_value in cumu_metrics.items():
-            #     print(f'[{epoch + 1}, {i + 1:5d}] {metric_name}: {metric_value / len(self.valid_loader):.3f}')
+                if self._continuous_outcome:
+                    for metric_name, metric_value in metrics.items():
+                        cumu_metrics[metric_name] += metric_value
+                else:
+                    cumu_metrics += metrics
 
-        return cumu_loss / len(self.valid_loader), cumu_metrics / len(self.valid_loader)
-
+            if self._continuous_outcome:
+                report_string = f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(self.valid_loader):.3f}'
+                for metric_name, metric_value in cumu_metrics.items():
+                    report_string += f' | {metric_name}: {metric_value / len(self.valid_loader):.3f}'
+                print(report_string) 
+            else:
+                print(f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(self.valid_loader):.3f} | acc: {cumu_metrics / len(self.valid_loader):.3f}')
+            
+        if self._continuous_outcome:
+            for metric_name, metric_value in cumu_metrics.items():
+                cumu_metrics[metric_name] = metric_value / len(self.valid_loader)
+            return cumu_loss / len(self.valid_loader), cumu_metrics
+        else:
+            return cumu_loss / len(self.valid_loader), cumu_metrics / len(self.valid_loader)
 
     def test_epoch(self, epoch, return_pred=False):
         self.model.eval() # turn on eval mode
@@ -217,7 +290,10 @@ class AbstractML:
         
         # record loss and metrics for the whole epoch
         cumu_loss = 0.0 
-        cumu_metrics = 0.0
+        if self._continuous_outcome:
+            cumu_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
+        else:
+            cumu_metrics = 0.0
 
         with torch.no_grad():
             for i, (x_cat, x_cont, y, sample_idx) in enumerate(self.test_loader):
@@ -226,36 +302,61 @@ class AbstractML:
                 sample_idx = sample_idx.to(self.device) 
                 outputs = self.model(x_cat, x_cont, sample_idx)
                 if return_pred:
-                    if self.n_output == 2:
-                        pred_list.append(torch.sigmoid(outputs).detach().to('cpu').numpy())
+                    if self._continuous_outcome:
+                        pred_list.append(outputs.detach().to('cpu').numpy())
                     else:
-                        pred_list.append(torch.softmax(outputs, dim=-1).detach().to('cpu').numpy())
+                        if self.n_output == 2:
+                            pred_list.append(torch.sigmoid(outputs).detach().to('cpu').numpy())
+                        else:
+                            pred_list.append(torch.softmax(outputs, dim=-1).detach().to('cpu').numpy())
                 
-                if self.n_output == 2: # binary classification
-                    # BCEWithLogitsLoss requires target as float, same size as outputs
-                    y = y.float() 
+                if self._continuous_outcome:
+                    y = y.float() # shape [batch_size] -> [batch_size, 1] for l1_loss
                 else:
-                    # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-                    y = y.long().squeeze(-1) 
+                    if self.n_output == 2: # binary classification
+                        # BCEWithLogitsLoss requires target as float, same size as outputs
+                        y = y.float() 
+                    else:
+                        # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
+                        y = y.long().squeeze(-1) 
                 loss = self.criterion(outputs, y)
                 metrics = self._metrics(outputs, y)
 
                 # print statistics
                 cumu_loss += loss.item()
-                cumu_metrics += metrics
+
+                if self._continuous_outcome:
+                    for metric_name, metric_value in metrics.items():
+                        cumu_metrics[metric_name] += metric_value
+                else:
+                    cumu_metrics += metrics
 
             if return_pred: 
-                print(f'[data_to_predict averaged] | loss: {cumu_loss / len(self.test_loader):.3f} | acc: {cumu_metrics / len(self.test_loader):.3f}') 
+                if self._continuous_outcome:
+                    report_string = f'[data_to_predict averaged] | loss: {cumu_loss / len(self.test_loader):.3f}'
+                    for metric_name, metric_value in cumu_metrics.items():
+                        report_string += f' | {metric_name}: {metric_value / len(self.test_loader):.3f}'
+                    print(report_string) 
+                else:
+                    print(f'[data_to_predict averaged] | loss: {cumu_loss / len(self.test_loader):.3f} | acc: {cumu_metrics / len(self.test_loader):.3f}') 
             else:
-                print(f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(self.test_loader):.3f} | acc: {cumu_metrics / len(self.test_loader):.3f}')
+                if self._continuous_outcome:
+                    report_string = f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(self.test_loader):.3f}'
+                    for metric_name, metric_value in cumu_metrics.items():
+                        report_string += f' | {metric_name}: {metric_value / len(self.test_loader):.3f}'
+                    print(report_string) 
+                else:
+                    print(f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(self.test_loader):.3f} | acc: {cumu_metrics / len(self.test_loader):.3f}')
                 
-            # for metric_name, metric_value in cumu_metrics.items():
-            #     print(f'[{epoch + 1}, {i + 1:5d}] {metric_name}: {metric_value / len(self.test_loader):.3f}')
-
         if return_pred:
             return pred_list
         else:
-            return cumu_loss / len(self.test_loader), cumu_metrics / len(self.test_loader)
+            if self._continuous_outcome:
+                for metric_name, metric_value in cumu_metrics.items():
+                    cumu_metrics[metric_name] = metric_value / len(self.test_loader)
+                return cumu_loss / len(self.test_loader), cumu_metrics
+            else:
+                return cumu_loss / len(self.test_loader), cumu_metrics / len(self.test_loader)
 
     def _build_model(self):
         pass 
@@ -282,22 +383,32 @@ class AbstractML:
         # return optim.Adam(self.model.parameters(), lr=0.001)
 
     def _loss_fn(self):
-        if self.n_output == 2: # binary classification
-            return nn.BCEWithLogitsLoss() # no need for sigmoid, require 1 output for binary classfication
+        if self._continuous_outcome:
+            return nn.L1Loss() # mae
+            # return nn.MSELoss() # mse
         else:
-            return nn.CrossEntropyLoss() # no need for softmax, require [n_output] output for classification
+            if self.n_output == 2: # binary classification
+                return nn.BCEWithLogitsLoss() # no need for sigmoid, require 1 output for binary classfication
+            else:
+                return nn.CrossEntropyLoss() # no need for softmax, require [n_output] output for classification
 
     def _metrics(self, outputs, labels):
-        if self.n_output == 2:
-            pred = torch.sigmoid(outputs) # get binary probability
-            pred_binary = torch.round(pred) # get binary prediction
-            return (pred_binary == labels).sum().item()/labels.shape[0] # num samples correctly classified / num_samples
+        if self._continuous_outcome:
+            mae_error = torch.abs(outputs - labels).mean()
+            mse_error = torch.pow(outputs - labels, 2).mean()
+            rmse_error = torch.sqrt(mse_error)
+            return {'mae':mae_error.item(), 'mse':mse_error.item(), 'rmse':rmse_error.item()}
         else:
-            # the class with the highest energy is what we choose as prediction, if output 2 categories for binary classificaiton
-            _, predicted = torch.max(outputs.data, 1)
-            # print(f'shape: pred {predicted.shape}, label {labels.shape}')
-            # print(f'device: pred {predicted.device}, label {labels.device}')
-            return (predicted == labels).sum().item()/labels.shape[0]
+            if self.n_output == 2:
+                pred = torch.sigmoid(outputs) # get binary probability
+                pred_binary = torch.round(pred) # get binary prediction
+                return (pred_binary == labels).sum().item()/labels.shape[0] # num samples correctly classified / num_samples
+            else:
+                # the class with the highest energy is what we choose as prediction, if output 2 categories for binary classificaiton
+                _, predicted = torch.max(outputs.data, 1)
+                # print(f'shape: pred {predicted.shape}, label {labels.shape}')
+                # print(f'device: pred {predicted.device}, label {labels.device}')
+                return (predicted == labels).sum().item()/labels.shape[0]
 
     def _save_model(self, custom_path=None):
         if custom_path is None:
@@ -321,9 +432,11 @@ class MLP(AbstractML):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output):
+    def _build_model(self, adj_matrix, 
+                    model_cat_vars, model_cont_vars, model_cat_unique_levels, 
+                    n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = MLPModel(adj_matrix, model_cat_unique_levels, n_cont, n_output) 
+        net = MLPModel(adj_matrix, model_cat_unique_levels, n_cont, n_output, _continuous_outcome) 
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             net = nn.DataParallel(net)
@@ -342,9 +455,11 @@ class GCN(AbstractML):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output):
+    def _build_model(self, adj_matrix, 
+                     model_cat_vars, model_cont_vars, model_cat_unique_levels, 
+                     n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = GCNModel(adj_matrix, model_cat_unique_levels, n_cont, n_output) 
+        net = GCNModel(adj_matrix, model_cat_unique_levels, n_cont, n_output, _continuous_outcome) 
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             net = nn.DataParallel(net)
@@ -415,21 +530,21 @@ if __name__ == '__main__':
     H, cat_vars, cont_vars, cat_unique_levels = diet_dgm(network=G, restricted=False, 
                                                         update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
     
-    # temporary modification to cat/var split
-    cat_vars.remove('B_30')
-    cont_vars.append('B_30')
-    cat_unique_levels.pop('B_30')
+    # temporary modification to cat/var split: Already fixed in beowulf
+    # cat_vars.remove('B_30')
+    # cont_vars.append('B_30')
+    # cat_unique_levels.pop('B_30')
 
-    # network-TMLE applies to generated data
-    tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
-                       cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                       use_deep_learner_A_i=True)
+    ## network-TMLE applies to generated data
+    # tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_A_i=True)
     # tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
     #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
     #                    use_deep_learner_A_i_s=True)
-    # tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
-    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-    #                    use_deep_learner_outcome=True)
+    tmle = NetworkTMLE(H, exposure='diet', outcome='bmi', degree_restrict=None,
+                       cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                       use_deep_learner_outcome=True)
     
     # add threshold measure
     tmle.define_threshold(variable='diet', threshold=3, definition='sum')
@@ -437,8 +552,8 @@ if __name__ == '__main__':
     # instantiation of deep learning model
     # 5 fold cross validation 
     # device
-    # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    device = 'cpu'
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # device = 'cpu'
     print(device)
 
     deep_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
@@ -451,8 +566,8 @@ if __name__ == '__main__':
     tmle.exposure_map_model("diet + B_30 + G:E + E_mean", measure='t3', distribution='threshold')
     # tmle.exposure_map_model("diet + B_30 + G:E + E_mean", measure='t3',
     #                         distribution='threshold', custom_model=deep_learner)  # use_deep_learner_A_i_s=True
-    tmle.outcome_model("diet + diet_t3 + B + G + E + E_sum + B_mean_dist", distribution='normal')
-    # tmle.outcome_model("diet + diet_t3 + B + G + E + E_sum + B_mean_dist", custom_model=deep_learner) # use_deep_learner_outcome=True
+    # tmle.outcome_model("diet + diet_t3 + B + G + E + E_sum + B_mean_dist", distribution='normal')
+    tmle.outcome_model("diet + diet_t3 + B + G + E + E_sum + B_mean_dist", custom_model=deep_learner) # use_deep_learner_outcome=True
     tmle.fit(p=0.65, bound=0.01)
     tmle.summary()
 
@@ -468,23 +583,36 @@ if __name__ == '__main__':
     cont_vars
     cat_unique_levels
 
+    
     import patsy
-    data_to_fit = tmle.df_restricted.copy()
-    data_to_predict = tmle.df_restricted.copy()
+    # exposure A_i
+    # data_to_fit = tmle.df_restricted.copy()
+    # data_to_predict = tmle.df_restricted.copy()
 
-    xdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
-    ydata = data_to_fit[tmle.exposure] 
+    # xdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
+    # ydata = data_to_fit[tmle.exposure] 
+    # n_output = pd.unique(ydata).shape[0]
+    # print(f'gi_model: n_output = {n_output} for target variable {tmle.exposure}')
+
+    # pdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
+    # pdata_y = data_to_predict[tmle.exposure]
+    # custom_path = 'denom_' + 'A_i_' + tmle.exposure  + '.pth'
+
+    # outcome
+    xdata = patsy.dmatrix("diet + diet_t3 + B + G + E + E_sum + B_mean_dist" + ' - 1', tmle.df_restricted, return_type="dataframe")
+    ydata = tmle.df_restricted[tmle.outcome] 
     n_output = pd.unique(ydata).shape[0]
-    print(f'gi_model: n_output = {n_output} for target variable {tmle.exposure}')
-
-    pdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
-    pdata_y = data_to_predict[tmle.exposure]
-    custom_path = 'denom_' + 'A_i_' + tmle.exposure  + '.pth'
 
     from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df 
+    # exposure A_i
+    # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+    #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
+    # fit_df = append_target_to_df(ydata, xdata, tmle.exposure)
+
+    # outcome
     model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
                                                                                                                                              cat_vars, cont_vars, cat_unique_levels)
-    fit_df = append_target_to_df(ydata, xdata, tmle.exposure)
+    fit_df = append_target_to_df(ydata, xdata, tmle.outcome)
 
     fit_df
     model_cat_vars
@@ -494,7 +622,19 @@ if __name__ == '__main__':
     pd.unique(fit_df['B_30'])
     pd.unique(tmle.df_restricted['B'])
 
+    tmle._continuous_outcome
+    model = deep_learner._build_model(None, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, tmle._continuous_outcome)
+    embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
+    embedding_sizes
+    model_cat_unique_levels
 
+    tmle.df_restricted['diet_t3']
+    pd.unique(tmle.df_restricted['diet_t3'])
+
+    cat_unique_levels
+
+    pd.unique(tmle.df_restricted['diet_t3']).max() + 1 
+    
     # # poisson model
     # import statsmodels.api as sm
     # import statsmodels.formula.api as smf

@@ -43,9 +43,9 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # decide use deep learning in which nuisance model
-use_deep_learner_A_i = False
+use_deep_learner_A_i = True
 use_deep_learner_A_i_s = False
-use_deep_learner_outcome = True
+use_deep_learner_outcome = False 
 
 # decide which model to use
 deep_learner_type = 'mlp' # 'mlp' or 'gcn'
@@ -230,42 +230,42 @@ for i in range(n_mc):
         else:
             raise ValueError("Deep learner should be used in given nuisance model, but not")
 
-    for p in prop_treated:  # loops through all treatment plans
-        if shift:
-            z = odds_to_probability(np.exp(log_odds + p))
-            ntmle.fit(p=z, bound=0.01)
-        else:
-            ntmle.fit(p=p, bound=0.01)
-        results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
-        results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
-        results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
-        results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
-        results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
-        results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
-        results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
-
     # for p in prop_treated:  # loops through all treatment plans
-    #     try:
-    #         if shift:
-    #             z = odds_to_probability(np.exp(log_odds + p))
-    #             ntmle.fit(p=z, bound=0.01)
-    #         else:
-    #             ntmle.fit(p=p, bound=0.01)
-    #         results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
-    #         results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
-    #         results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
-    #         results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
-    #         results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
-    #         results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
-    #         results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
-    #     except:
-    #         results.loc[i, 'bias_'+str(p)] = np.nan
-    #         results.loc[i, 'var_'+str(p)] = np.nan
-    #         results.loc[i, 'lcl_'+str(p)] = np.nan
-    #         results.loc[i, 'ucl_'+str(p)] = np.nan
-    #         results.loc[i, 'varl_'+str(p)] = np.nan
-    #         results.loc[i, 'lcll_'+str(p)] = np.nan
-    #         results.loc[i, 'ucll_'+str(p)] = np.nan
+    #     if shift:
+    #         z = odds_to_probability(np.exp(log_odds + p))
+    #         ntmle.fit(p=z, bound=0.01)
+    #     else:
+    #         ntmle.fit(p=p, bound=0.01)
+    #     results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
+    #     results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
+    #     results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
+    #     results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
+    #     results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
+    #     results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
+    #     results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
+
+    for p in prop_treated:  # loops through all treatment plans
+        try:
+            if shift:
+                z = odds_to_probability(np.exp(log_odds + p))
+                ntmle.fit(p=z, bound=0.01)
+            else:
+                ntmle.fit(p=p, bound=0.01)
+            results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
+            results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
+            results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
+            results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
+            results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
+            results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
+            results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
+        except:
+            results.loc[i, 'bias_'+str(p)] = np.nan
+            results.loc[i, 'var_'+str(p)] = np.nan
+            results.loc[i, 'lcl_'+str(p)] = np.nan
+            results.loc[i, 'ucl_'+str(p)] = np.nan
+            results.loc[i, 'varl_'+str(p)] = np.nan
+            results.loc[i, 'lcll_'+str(p)] = np.nan
+            results.loc[i, 'ucll_'+str(p)] = np.nan
 
 
 ########################################

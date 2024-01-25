@@ -445,7 +445,7 @@ class NetworkTMLE:
                 self._q_custom_ = custom_model
                 self._q_custom_path_, self._Qinit_ = outcome_deep_learner(custom_model, 
                                                                           xdata, ydata, self.outcome,
-                                                                          self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
+                                                                          self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output, self._continuous_outcome,
                                                                           predict_with_best=False, custom_path=custom_path)
             else:
                 # Extract data using the model
@@ -561,7 +561,7 @@ class NetworkTMLE:
                 ydata = pooled_data_restricted[self.outcome] 
                 n_output = pd.unique(ydata).shape[0]
                 y_star = outcome_deep_learner(self._q_custom_, xdata, ydata, self.outcome, 
-                                              self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
+                                              self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output, self._continuous_outcome,
                                               predict_with_best=True, custom_path=self._q_custom_path_)
             else:
                 d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted)  # ... extract data via patsy
@@ -1271,11 +1271,22 @@ class NetworkTMLE:
                     print(treat_s_model.summary())
             else:                                                                 # Else custom model for threshold
                 if self.use_deep_learner_A_i_s:
-                    xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit, return_type="dataframe")
-                    pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict, return_type="dataframe")
+                    data_to_fit_subset = select_pooled_sample_with_observed_data(self._gs_measure_, data_to_fit, data_to_predict)
+                    print(f'gs_model: use {data_to_fit_subset.shape[0]} samples from original {data_to_fit.shape[0]} to fit the model')
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1', 
+                                          data_to_fit_subset, return_type="dataframe")       # Extract via patsy the data
+                    ydata = data_to_fit_subset[self._gs_measure_]
+                    n_output = pd.unique(ydata).shape[0] 
+                    print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
+
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1', 
+                                          data_to_predict, return_type="dataframe")   # Extract via patsy the data
+                    pdata_y = data_to_predict[self._gs_measure_]
+                    custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
                     pred = exposure_deep_learner(self._gs_custom_, 
-                                                 xdata, data_to_fit[self._gs_measure_], pdata, self._gs_measure_,
-                                                 self.cat_vars, self.cont_vars, self.cat_unique_levels)
+                                                 xdata, ydata, pdata, pdata_y, self._gs_measure_,
+                                                 self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
+                                                 custom_path, **kwargs)
                 else:
                     xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit)       # Processing data to be fit
                     pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict)   # Processing data to be fit
