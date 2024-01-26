@@ -43,9 +43,9 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # decide use deep learning in which nuisance model
-use_deep_learner_A_i = True
-use_deep_learner_A_i_s = False
-use_deep_learner_outcome = False 
+use_deep_learner_A_i = False
+use_deep_learner_A_i_s = False 
+use_deep_learner_outcome = True 
 
 # decide which model to use
 deep_learner_type = 'mlp' # 'mlp' or 'gcn'
