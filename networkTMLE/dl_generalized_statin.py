@@ -202,9 +202,9 @@ for i in range(n_mc):
                 ntmle.define_category(variable='R_3_sum', bins=[0, 1, 2, 25], labels=False)
         else:
             raise ValueError("Invalid model-network combo")
-    ntmle.exposure_model(gin_model)
-    ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
-    ntmle.outcome_model(qn_model, custom_model=q_estimator)
+    # ntmle.exposure_model(gin_model)
+    # ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
+    # ntmle.outcome_model(qn_model, custom_model=q_estimator)
 
     # use deep learner
     if use_deep_learner_A_i or use_deep_learner_A_i_s or use_deep_learner_outcome:
@@ -223,12 +223,22 @@ for i in range(n_mc):
 
         if use_deep_learner_A_i:
             ntmle.exposure_model(gin_model, custom_model=deep_learner) 
+            ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
+            ntmle.outcome_model(qn_model, custom_model=q_estimator) 
         elif use_deep_learner_A_i_s:
+            ntmle.exposure_model(gin_model) 
             ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=deep_learner) 
+            ntmle.outcome_model(qn_model, custom_model=q_estimator)
         elif use_deep_learner_outcome:
+            ntmle.exposure_model(gin_model)
+            ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs) 
             ntmle.outcome_model(qn_model, custom_model=deep_learner) 
         else:
             raise ValueError("Deep learner should be used in given nuisance model, but not")
+    else: # DO NOT use deep learner
+        ntmle.exposure_model(gin_model)
+        ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
+        ntmle.outcome_model(qn_model, custom_model=q_estimator)
 
     for p in prop_treated:  # loops through all treatment plans
         if shift:

@@ -523,6 +523,48 @@ if __name__ == '__main__':
     tmle.fit(p=0.35, bound=0.01)
     tmle.summary()
 
+    ######################################### Naloxone-Overdose -- DGM: test run ######################################### 
+    # loading uniform network with naloxone W
+    G, cat_vars, cont_vars, cat_unique_levels = load_random_naloxone(n=500, return_cat_cont_split=True)
+    # Simulation single instance of exposure and outcome
+    H, cat_vars, cont_vars, cat_unique_levels = naloxone_dgm(network=G, restricted=False,
+                                                             update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
+    # network-TMLE applies to generated data
+    # tmle = NetworkTMLE(H, exposure='naloxone', outcome='overdose', degree_restrict=(0, 18),
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_A_i=True)
+    # tmle = NetworkTMLE(H, exposure='naloxone', outcome='overdose', degree_restrict=(0, 18),
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_A_i_s=True)
+    tmle = NetworkTMLE(H, exposure='naloxone', outcome='overdose', degree_restrict=(0, 18),
+                       cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                       use_deep_learner_outcome=True)
+
+    # instantiation of deep learning model
+    # 5 fold cross validation 
+    # device
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # device = 'cpu'
+    print(device)
+
+    deep_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                      epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+
+    tmle.exposure_model("P + P:G + O_mean + G_mean")
+    # tmle.exposure_model("P + P:G + O_mean + G_mean", custom_model=deep_learner) # use_deep_learner_A_i=True
+    tmle.exposure_map_model("naloxone + P + P:G + O_mean + G_mean",
+                            measure='sum', distribution='poisson')  # Applying a Poisson model
+    # tmle.exposure_map_model("naloxone + P + P:G + O_mean + G_mean",
+    #                          measure='sum', distribution='poisson', custom_model=deep_learner)  # use_deep_learner_A_i_s=True
+    # tmle.outcome_model("naloxone_sum + P + G + O_mean + G_mean")
+    tmle.outcome_model("naloxone_sum + P + G + O_mean + G_mean", custom_model=deep_learner) # use_deep_learner_outcome=True
+    tmle.fit(p=0.35, bound=0.01)
+    tmle.summary()
+
+
     ######################################### diet-bmi -- DGM: test run #########################################
     # loading uniform network with diet W
     G, cat_vars, cont_vars, cat_unique_levels = load_uniform_diet(n=500, return_cat_cont_split=True)
@@ -571,69 +613,108 @@ if __name__ == '__main__':
     tmle.fit(p=0.65, bound=0.01)
     tmle.summary()
 
-   
-   
-    # # ############################# scratch #################################
-    tmle.df_restricted.columns
-    tmle.df_restricted['diet_t3']
-    tmle.df_restricted['diet_t3'].value_counts()
-    tmle.df_restricted['bmi']
+    ######################################### Vaccine-Infection -- DGM: test run #########################################
+    # loading uniform network with diet W
+    G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=500, return_cat_cont_split=True)
+    # Simulation single instance of exposure and outcome
+    H, cat_vars, cont_vars, cat_unique_levels = vaccine_dgm(network=G, restricted=False, 
+                                                        update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+    
+    ## network-TMLE applies to generated data
+    # tmle = NetworkTMLE(H, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_A_i=True)
+    # tmle = NetworkTMLE(H, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
+    #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                    use_deep_learner_A_i_s=True)
+    tmle = NetworkTMLE(H, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
+                       cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                       use_deep_learner_outcome=True) 
 
-    cat_vars
-    cont_vars
-    cat_unique_levels
+    # instantiation of deep learning model
+    # 5 fold cross validation 
+    # device
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # device = 'cpu'
+    print(device)
+
+    deep_learner = MLP(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                      epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    
+    tmle.exposure_model("A + H + H_mean + degree")
+    # tmle.exposure_model("A + H + H_mean + degree", custom_model=deep_learner) # use_deep_learner_A_i=True
+    tmle.exposure_map_model("vaccine + A + H + H_mean + degree",
+                            measure='sum', distribution='poisson')
+    # tmle.exposure_map_model("vaccine + A + H + H_mean + degree",
+    #                         measure='sum', distribution='poisson', custom_model=deep_learner)  # use_deep_learner_A_i_s=True
+    # tmle.outcome_model("vaccine + vaccine_mean + A + H + A_mean + H_mean + degree")
+    tmle.outcome_model("vaccine + vaccine_mean + A + H + A_mean + H_mean + degree", custom_model=deep_learner) # use_deep_learner_outcome=True
+    tmle.fit(p=0.55, bound=0.01)
+    tmle.summary()
+    
+    # # ############################# scratch #################################
+    # tmle.df_restricted.columns
+    # tmle.df_restricted['diet_t3']
+    # tmle.df_restricted['diet_t3'].value_counts()
+    # tmle.df_restricted['bmi']
+
+    # cat_vars
+    # cont_vars
+    # cat_unique_levels
 
     
-    import patsy
-    # exposure A_i
-    # data_to_fit = tmle.df_restricted.copy()
-    # data_to_predict = tmle.df_restricted.copy()
+    # import patsy
+    # # exposure A_i
+    # # data_to_fit = tmle.df_restricted.copy()
+    # # data_to_predict = tmle.df_restricted.copy()
 
-    # xdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
-    # ydata = data_to_fit[tmle.exposure] 
+    # # xdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
+    # # ydata = data_to_fit[tmle.exposure] 
+    # # n_output = pd.unique(ydata).shape[0]
+    # # print(f'gi_model: n_output = {n_output} for target variable {tmle.exposure}')
+
+    # # pdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
+    # # pdata_y = data_to_predict[tmle.exposure]
+    # # custom_path = 'denom_' + 'A_i_' + tmle.exposure  + '.pth'
+
+    # # outcome
+    # xdata = patsy.dmatrix("diet + diet_t3 + B + G + E + E_sum + B_mean_dist" + ' - 1', tmle.df_restricted, return_type="dataframe")
+    # ydata = tmle.df_restricted[tmle.outcome] 
     # n_output = pd.unique(ydata).shape[0]
-    # print(f'gi_model: n_output = {n_output} for target variable {tmle.exposure}')
 
-    # pdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
-    # pdata_y = data_to_predict[tmle.exposure]
-    # custom_path = 'denom_' + 'A_i_' + tmle.exposure  + '.pth'
+    # from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df 
+    # # exposure A_i
+    # # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+    # #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
+    # # fit_df = append_target_to_df(ydata, xdata, tmle.exposure)
 
-    # outcome
-    xdata = patsy.dmatrix("diet + diet_t3 + B + G + E + E_sum + B_mean_dist" + ' - 1', tmle.df_restricted, return_type="dataframe")
-    ydata = tmle.df_restricted[tmle.outcome] 
-    n_output = pd.unique(ydata).shape[0]
-
-    from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df 
-    # exposure A_i
+    # # outcome
     # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
     #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
-    # fit_df = append_target_to_df(ydata, xdata, tmle.exposure)
+    # fit_df = append_target_to_df(ydata, xdata, tmle.outcome)
 
-    # outcome
-    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-                                                                                                                                             cat_vars, cont_vars, cat_unique_levels)
-    fit_df = append_target_to_df(ydata, xdata, tmle.outcome)
+    # fit_df
+    # model_cat_vars
+    # model_cont_vars
+    # model_cat_unique_levels
+    # fit_df['B_30'].value_counts()
+    # pd.unique(fit_df['B_30'])
+    # pd.unique(tmle.df_restricted['B'])
 
-    fit_df
-    model_cat_vars
-    model_cont_vars
-    model_cat_unique_levels
-    fit_df['B_30'].value_counts()
-    pd.unique(fit_df['B_30'])
-    pd.unique(tmle.df_restricted['B'])
+    # tmle._continuous_outcome
+    # model = deep_learner._build_model(None, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, tmle._continuous_outcome)
+    # embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
+    # embedding_sizes
+    # model_cat_unique_levels
 
-    tmle._continuous_outcome
-    model = deep_learner._build_model(None, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, tmle._continuous_outcome)
-    embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
-    embedding_sizes
-    model_cat_unique_levels
+    # tmle.df_restricted['diet_t3']
+    # pd.unique(tmle.df_restricted['diet_t3'])
 
-    tmle.df_restricted['diet_t3']
-    pd.unique(tmle.df_restricted['diet_t3'])
+    # cat_unique_levels
 
-    cat_unique_levels
-
-    pd.unique(tmle.df_restricted['diet_t3']).max() + 1 
+    # pd.unique(tmle.df_restricted['diet_t3']).max() + 1 
     
     # # poisson model
     # import statsmodels.api as sm
@@ -872,3 +953,134 @@ if __name__ == '__main__':
 
     # type(pooled_data_restricted[tmle._gs_measure_])
     # type(dummy_target)
+
+    import random
+    import numpy as np
+    import pandas as pd
+    import networkx as nx
+    from scipy.stats import logistic
+
+    from beowulf.dgm.utils import (network_to_df, fast_exp_map, exposure_restrictions,
+                                odds_to_probability, probability_to_odds)
+    
+    from beowulf import load_uniform_vaccine, load_random_vaccine
+
+    n=500
+
+    # uniform
+    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
+
+
+    # params
+    network = G
+    restricted = False
+    time_limit = 10
+    inf_duration = 5
+    update_split = True
+
+
+    graph = network.copy()
+    data = network_to_df(graph)
+
+    adj_matrix = nx.adjacency_matrix(graph, weight=None)
+    data['A_sum'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='sum')
+    data['A_mean'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='mean')
+    data['H_sum'] = fast_exp_map(adj_matrix, np.array(data['H']), measure='sum')
+    data = pd.merge(data, pd.DataFrame.from_dict(dict(network.degree),
+                                                 orient='index').rename(columns={0: 'F'}),
+                    how='left', left_index=True, right_index=True)
+
+    # Running Data Generating Mechanism for A
+    pr_a = logistic.cdf(-1.9 + 1.75*data['A'] + 1.*data['H']
+                        + 1.*data['H_sum'] + 1.3*data['A_sum'] - 0.65*data['F'])
+    vaccine = np.random.binomial(n=1, p=pr_a, size=nx.number_of_nodes(graph))
+    data['vaccine'] = vaccine
+    if restricted:  # if we are in the restricted scenarios
+        attrs = exposure_restrictions(network=network.graph['label'], exposure='vaccine',
+                                      n=nx.number_of_nodes(graph))
+        data.update(pd.DataFrame(list(attrs.values()), index=list(attrs.keys()), columns=['vaccine']))
+
+    # print("Pr(V):", np.mean(vaccine))
+    for n in graph.nodes():
+        graph.nodes[n]['vaccine'] = int(data.loc[data.index == n, 'vaccine'].values)
+    
+    # inside outbreak
+    duration = inf_duration
+    limit = time_limit
+    # Adding node attributes
+    for n, d in graph.nodes(data=True):
+        d['D'] = 0
+        d['R'] = 0
+        d['t'] = 0
+
+    # Selecting initial infections
+    all_ids = [n for n in graph.nodes()]
+    # infected = random.sample(all_ids, 5)
+    if len(all_ids) <= 500:
+        infected = [4, 36, 256, 305, 443]
+    elif len(all_ids) == 1000:
+        infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946]
+    elif len(all_ids) == 2000:
+        infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946,
+                    1112, 1204, 1243, 1253, 1283, 1339, 1352, 1376, 1558, 1702]
+    else:
+        raise ValueError("Invalid network IDs")
+
+    # Running through infection cycle
+    graph_by_time = []
+    time = 0
+    while time < limit:  # Simulate outbreaks until time-step limit is reached
+        time += 1
+        for inf in sorted(infected, key=lambda _: random.random()):
+            # Book-keeping for infected nodes
+            graph.nodes[inf]['D'] = 1
+            graph.nodes[inf]['t'] += 1
+            if graph.nodes[inf]['t'] > duration:
+                graph.nodes[inf]['I'] = 0         # Node is no longer infectious after this loop
+                graph.nodes[inf]['R'] = 1         # Node switches to Recovered
+                infected.remove(inf)
+
+            # Attempt infections of neighbors
+            for contact in nx.neighbors(graph, inf):
+                if graph.nodes[contact]["D"] == 1:
+                    pass
+                else:
+                    pr_y = logistic.cdf(- 2.5
+                                        - 1.0*graph.nodes[contact]['vaccine']
+                                        - 0.2*graph.nodes[inf]['vaccine']
+                                        + 1.0*graph.nodes[contact]['A']
+                                        - 0.2*graph.nodes[contact]['H'])
+                    if np.random.binomial(n=1, p=pr_y, size=1):
+                        graph.nodes[contact]['I'] = 1
+                        graph.nodes[contact]["D"] = 1
+                        infected.append(contact)
+        graph_by_time.append(graph.copy()) # save all variables and nodes for each time point
+    
+    len(graph_by_time)
+    graph_by_time[0]
+
+    data_0 = network_to_df(graph_by_time[0])
+    data_0
+    data_1 = network_to_df(graph_by_time[1])
+    data_1
+
+    for i in range(len(graph_by_time)):
+        print(network_to_df(graph_by_time[i]))
+
+    tmp = network_to_df(graph_by_time[-1])
+    tmp['I'].fillna(2., inplace=True)
+    tmp
+
+    pd.unique(network_to_df(graph_by_time[-1])['I'])
+    pd.unique(network_to_df(graph_by_time[-1])['t'])
+    pd.unique(network_to_df(graph_by_time[-1])['D'])
+    pd.unique(network_to_df(graph_by_time[-1])['R'])
+    pd.unique(network_to_df(graph_by_time[-1])['vaccine'])
+    pd.unique(network_to_df(graph_by_time[-1])['A'])
+    pd.unique(network_to_df(graph_by_time[-1])['H'])
+
+    ''' 
+    'D' represents during the time_limit, have this individual ever been infected;
+    for 'I', representing infectious ability, where 1. means can infect others, 0. means lose the ability to infect others,
+    Nan means never been infected and thus unknown, should be recoded to 2.
+    '''
