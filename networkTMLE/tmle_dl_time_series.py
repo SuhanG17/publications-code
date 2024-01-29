@@ -220,7 +220,7 @@ class NetworkTMLETimeSeries:
                                                                      v_vector,
                                                                      measure=summary_measure)
                     if summary_measure in handle_isolates:                                      # ... set isolates from nan to 0
-                        df[v+'_'+summary_measure] = df[v+'_'+summary_measure].fillna(0)
+                        df_list[i][v+'_'+summary_measure] = df_list[i][v+'_'+summary_measure].fillna(0)
                     
                     if v+'_'+summary_measure not in self.cont_vars:
                         self.cont_vars.append(v+'_'+summary_measure)                            # ... add to continuous variables (SG_modified)
@@ -232,9 +232,9 @@ class NetworkTMLETimeSeries:
                                               variable=exposure,             # ... for the exposure
                                               max_degree=self._max_degree_[i])  # ... up to the maximum degree
             self._nonparam_cols_.append(list(exp_map_cols.columns))                # Save column list for estimation procedure
-            df = pd.merge(df_list[i],                                                # Merge these columns into main data
-                          exp_map_cols.fillna(0),                            # set nan to 0 to keep same dimension across i
-                          how='left', left_index=True, right_index=True)     # Merge on index to left
+            df_list[i] = pd.merge(df_list[i],                                                # Merge these columns into main data
+                                  exp_map_cols.fillna(0),                            # set nan to 0 to keep same dimension across i
+                                  how='left', left_index=True, right_index=True)     # Merge on index to left
 
         # Assign all mappings variables  (SG_modified)
         # summary measures are consistent throughout time, hence all var names can be added to self.cat_vars/cont_vars
@@ -259,6 +259,7 @@ class NetworkTMLETimeSeries:
             raise ValueError('exposure is neither assigned to categorical or continuous variables')
 
         # Calculating degree for all the nodes
+        self.df_list = [None] * len(df_list) # init self.df_list
         for i in range(len(self.network_list)):
             if nx.is_directed(self.network_list[i]):                                                    # For directed networks...
                 degree_data = pd.DataFrame.from_dict(dict(self.network_list[i].out_degree),             # ... use the out-degree
@@ -266,24 +267,24 @@ class NetworkTMLETimeSeries:
             else:                                                                                       # For undirected networks...
                 degree_data = pd.DataFrame.from_dict(dict(self.network_list[i].degree),                 # ... use the regular degree
                                                      orient='index').rename(columns={0: 'degree'})
-            self.df_list = pd.merge(df_list[i],                                                         # Merge main data
-                                    degree_data,                                                        # ...with degree data
-                                    how='left', left_index=True, right_index=True)                      # ...based on index
+            self.df_list[i] = pd.merge(df_list[i],                                                         # Merge main data
+                                       degree_data,                                                        # ...with degree data
+                                       how='left', left_index=True, right_index=True)                      # ...based on index
         
         # Assign degree variables (SG_modified)
         self.cat_vars.append('degree')
         for i in range(len(self.df_list)):
             if i == 0:
-                self.cat_unique_levels['degree'] = pd.unique(self.df['degree'].astype('int')).max() + 1
+                self.cat_unique_levels['degree'] = pd.unique(self.df_list[i]['degree'].astype('int')).max() + 1
             else: # update when bigger degree is encountered
-                if pd.unique(self.df['degree'].astype('int')).max() + 1 > self.cat_unique_levels['degree']:
-                    self.cat_unique_levels['degree'] = pd.unique(self.df['degree'].astype('int')).max() + 1 
+                if pd.unique(self.df_list[i]['degree'].astype('int')).max() + 1 > self.cat_unique_levels['degree']:
+                    self.cat_unique_levels['degree'] = pd.unique(self.df_list[i]['degree'].astype('int')).max() + 1 
 
         # Apply degree restriction to data
         for i in range(len(self.df_list)):
             if degree_restrict is not None:                                                                                 # If restriction provided,
-                self.df['__degree_flag__'] = self._degree_restrictions_(degree_dist=self.df_list[i]['degree'],
-                                                                        bounds=degree_restrict)
+                self.df_list[i]['__degree_flag__'] = self._degree_restrictions_(degree_dist=self.df_list[i]['degree'],
+                                                                                bounds=degree_restrict)
                 self._exclude_ids_degree_ = np.asarray(self.df_list[i].loc[self.df_list[i]['__degree_flag__'] == 1].index)
             else:                                                                                                           # Else all observations are used
                 self.df_list[i]['__degree_flag__'] = 0                                                                      # Mark all as zeroes
@@ -291,7 +292,7 @@ class NetworkTMLETimeSeries:
 
         # Marking data set restricted by degree (same as df if no restriction)
         # self.df_restricted = self.df.loc[self.df['__degree_flag__'] == 0].copy()
-        self.df_restricted_list = [df.loc[self.df['__degree_flag__'] == 0].copy() for df in self.df_list]
+        self.df_restricted_list = [df.loc[df['__degree_flag__'] == 0].copy() for df in self.df_list]
 
         # Output attributes
         self.marginals_vector, self.marginal_outcome = None, None
@@ -1484,5 +1485,400 @@ class NetworkTMLETimeSeries:
 # model: how to apply GCN? 
 # consider how to modify AbstractML
 
+# load uniform vaccine network
+from beowulf import load_uniform_vaccine        
+
 # load network_list
 from Beowulf.beowulf.dgm.vaccine_with_cat_cont_split import vaccine_dgm_time_series
+
+n_nodes = 500
+restrict = False
+exposure = "vaccine"
+outcome = "D"
+degree_restrict = None
+
+
+G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n_nodes, return_cat_cont_split=True)
+H, cat_vars, cont_vars, cat_unique_levels, network_list = vaccine_dgm_time_series(network=G, restricted=restrict, 
+                                                            update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
+ntmle = NetworkTMLETimeSeries(network_list, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
+                              cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
+ntmle.df_restricted_list
+
+################## inside outcome_model(): if self.use_deep_learner_outcome: ################## 
+model = "vaccine + vaccine_sum + A + H + A_sum + H_sum + degree"
+custom_model = None
+
+
+xdata_list = []
+ydata_list = []
+n_output_list = []
+
+for df_restricted in ntmle.df_restricted_list:
+    xdata_list.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
+    ydata_list.append(df_restricted[ntmle.outcome])
+    # ydata.append(self.df_restricted_list[-1][self.outcome])
+    # n_output = pd.unique(ydata).shape[0]
+    n_output_list.append(pd.unique(df_restricted[ntmle.outcome]).shape[0])
+    custom_path = 'outcome_' + ntmle.outcome + '.pth'
+    ntmle._q_custom_ = custom_model
+
+
+from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df
+
+aa = []
+bb = []
+cc = []
+for xdata in xdata_list:
+    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+                                                                                                                                            cat_vars, cont_vars, cat_unique_levels)
+    aa.append(model_cat_vars)
+    bb.append(model_cont_vars)
+    cc.append(model_cat_unique_levels)
+
+# def check_identical(list):
+    
+#     return len(set(list)) == 1
+
+from itertools import groupby
+
+def all_equal(iterable):
+    '''check if all elements in a list are identical'''
+    g = groupby(iterable)
+    return next(g, True) and not next(g, False)
+
+
+def update_cat_var_unique_levels(cat_var_unique_levels_list):
+    model_cat_unique_levels_final = {} 
+    for i, cat_var_level_dict in enumerate(cat_var_unique_levels_list):
+        for var_name, num_levels in cat_var_level_dict.items():
+            if i == 0:
+                model_cat_unique_levels_final[var_name] = num_levels
+            else:
+                if num_levels > model_cat_unique_levels_final[var_name]:
+                    model_cat_unique_levels_final[var_name] = num_levels 
+    return model_cat_unique_levels_final
+
+
+if not all_equal(aa):
+    raise ValueError("cat_vars are not identical throughout time slices")
+else:
+    model_cat_vars_final = aa[-1]
+
+if not all_equal(bb):
+    raise ValueError("cont_vars are not identical throughout time slices")
+else:
+    model_cont_vars_final = bb[-1]
+
+if not all_equal(cc):
+    print(f'cat_vars levels are not identical througout time slices:')
+    print(cc)
+    print(f'adopt the maximum levels for each variable:')
+    model_cat_unique_levels_final = update_cat_var_unique_levels(cc) 
+    print(model_cat_unique_levels_final)
+else:
+    model_cat_unique_levels_final = cc[-1]
+
+
+
+
+# model_cat_unique_levels_final = update_cat_var_unique_levels(cc)
+# model_cat_unique_levels_final
+
+deep_learner_df_list = []
+for xdata, ydata in zip(xdata_list, ydata_list):
+    deep_learner_df_list.append(append_target_to_df(ydata, xdata, ntmle.outcome))
+
+len(deep_learner_df_list)
+
+
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+class TimeSeriesDataset(Dataset):
+    def __init__(self, patsy_matrix_dataframe_list, target=None, use_all_time_slices=True, 
+                 model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
+        
+        # use numerical index to avoid looping inside _getitem_()
+        self.cat_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cat_vars)
+        self.cont_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cont_vars)
+        self.target_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], [target])
+
+        self.data_array = np.stack([df.to_numpy() for df in patsy_matrix_dataframe_list], axis=-1) 
+        # len(patsy_matrix_dataframe_list) = T
+        # self.data_array: [num_samples, num_features, T]
+
+        self.use_all_time_slices = use_all_time_slices
+
+    def _column_name_to_index(self, dataframe, column_name):
+        return dataframe.columns.get_indexer(column_name)
+    
+    def _get_labels(self):
+        return self.data_array[:, self.target, :]
+
+    def __getitem__(self, idx):
+        cat_vars = torch.from_numpy(self.data_array[idx, self.cat_col_index, :]).int() # [num_cat_vars, T]
+        cont_vars = torch.from_numpy(self.data_array[idx, self.cont_col_index, :]).float() # [num_cont_vars, T]
+        labels = torch.from_numpy(self.data_array[idx, self.target_col_index, :]).float().squeeze(0) # [1, T] -> [T]
+
+        if not self.use_all_time_slices:
+            labels = labels[-1] # [] 
+        
+        return cat_vars, cont_vars, labels, idx # idx shape []
+
+    def __len__(self):
+        return self.data_array.shape[0]
+
+ts_dset = TimeSeriesDataset(deep_learner_df_list, ntmle.outcome, use_all_time_slices=True,
+                            model_cat_vars=model_cat_vars_final, 
+                            model_cont_vars=model_cont_vars_final, 
+                            model_cat_unique_levels=model_cat_unique_levels_final)
+
+ts_dset = TimeSeriesDataset(deep_learner_df_list, ntmle.outcome, use_all_time_slices=False,
+                            model_cat_vars=model_cat_vars_final, 
+                            model_cont_vars=model_cont_vars_final, 
+                            model_cat_unique_levels=model_cat_unique_levels_final)
+
+cat_dummy, cont_dummy, label_dummy, idx_dummy = ts_dset.__getitem__(0)
+
+len(ts_dset)
+
+cat_dummy.shape
+cont_dummy.shape
+label_dummy.shape
+label_dummy
+idx_dummy.shape
+
+
+loader = DataLoader(ts_dset, batch_size=4, shuffle=True)
+
+
+for cat_vars, cont_vars, labels, idices in loader:
+    print(cat_vars.shape)
+    print(cont_vars.shape)
+    print(labels.shape)
+    print(idices.shape)
+    break
+
+
+from dl_models import MLPModel
+mlp_model = MLPModel(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
+                    n_output=2, _continuous_outcome=False)
+
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class MLPModelTimeSeries(nn.Module):
+    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, T=10,
+                 n_output=2, _continuous_outcome=False):
+        super().__init__()
+        self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
+        self.n_cont = n_cont
+
+        # variable dimension feature extraction
+        self.lin1 = nn.Linear(self.n_emb + self.n_cont, 16)
+        self.lin2 = nn.Linear(16, 32)
+        # if use BCEloss, number of output should be 1, i.e. the probability of getting category 1
+        # else number of output should be as specified
+        if n_output == 2 or _continuous_outcome:
+            self.lin3 = nn.Linear(32, 1) 
+        else:
+            self.lin3 = nn.Linear(32, n_output)
+        self.bn1 = nn.BatchNorm1d(self.n_cont)
+        self.bn2 = nn.BatchNorm1d(16)
+        self.bn3 = nn.BatchNorm1d(32)
+        self.emb_drop = nn.Dropout(0.6)
+        self.drops = nn.Dropout(0.3)
+
+        # time dimension feature extract 
+        self.ts_lin1 = nn.Linear(T, 16)
+        self.ts_lin2 = nn.Linear(16, T)
+
+
+    def _get_embedding_layers(self, model_cat_unique_levels):
+        # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
+        # decide embedding sizes
+        embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
+        embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
+        n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
+        # n_cont = dataset.x_cont.shape[1] # number of continuous variables
+
+        return embedding_layers, n_emb
+    
+    def forward(self, x_cat, x_cont, batched_nodes_indices=None):
+        # x_cat: [batch_size, num_cat_vars, T]
+        # x_cont: [batch_size, num_cont_vars, T]
+        # batched_nodex_indices: [batch_size]
+
+        x_cat_new = x_cat.permute(0, 2, 1)
+        # x_cat_new: [batch_size, T, num_cat_vars]
+
+        if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
+            x1 = [e(x_cat_new[:, :, 1]) for i, e in enumerate(self.embedding_layers)]
+            x1 = torch.cat(x1, -1) # [batch_size, T, n_emb]
+            x1 = self.emb_drop(x1)
+
+        if self.n_cont > 0: # if there are continuous variables to be encoded
+            x2 = self.bn1(x_cont).permute(0, 2, 1) # [batch_size, T, n_cont]
+        
+        if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
+            x = torch.cat([x1, x2], -1) # [batch_size, T, n_emb + n_cont]
+            # temporal perspective
+            x = F.relu(self.ts_lin1(x.permute(0, 2, 1))).permute(0, 2, 1) 
+            # [batch_size, T, n_emb + n_cont] -> [batch_size, n_emb + n_cont, T] 
+            # -> [batch_size, n_emb + n_cont, 16] -> [batch_size, 16, n_emb + n_cont]
+
+            # variable perspective
+            x = F.relu(self.lin1(x)) # [batch_size, 16, n_emb + n_cont] -> [batch_size, 16, 16]
+            x = self.drops(x)       
+            x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1) 
+            # [batch_size, 16(ts_c), 16(v_c)] -> [batch_size, 16(v_c), 16(ts_c)] ->  [batch_size, 16(ts_c), 16(v_c)]
+            x = F.relu(self.lin2(x)) # [batch_size, 16, 16] -> [batch_size, 16, 32] 
+            x = self.drops(x)
+            x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
+            # [batch_size, 16, 32] -> [batch_size, 32, 16] -> [batch_size, 16, 32
+            x = self.lin3(x)         # [batch_size, 16, 32] -> [batch_size, 16, 1]
+
+            # temporal perspective
+            x = self.ts_lin2(x.permute(0, 2, 1))
+            # [batch_size, 16, 1] -> [batch_size, 1, 16] -> [batch_size, 1, T] 
+
+        elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
+            # temporal perspective
+            x = self.ts_lin1(x1.permute(0, 2, 1)).permute(0, 2, 1)
+            # variable perspective
+            x = F.relu(self.lin1(x))
+            x = self.drops(x)       
+            x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1)
+            x = F.relu(self.lin2(x))
+            x = self.drops(x)
+            x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
+            x = self.lin3(x)
+            # temporal perspective
+            x = self.ts_lin2(x.permute(0, 2, 1))
+
+        elif len(self.embedding_layers) == 0 and self.n_cont > 0:
+            # temporal perspective
+            x = self.ts_lin1(x2.permute(0, 2, 1)).permute(0, 2, 1)
+            # variable perspective
+            x = F.relu(self.lin1(x))
+            x = self.drops(x)       
+            x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1)
+            x = F.relu(self.lin2(x))
+            x = self.drops(x)
+            x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
+            x = self.lin3(x)
+            # temporal perspective
+            x = self.ts_lin2(x.permute(0, 2, 1))
+        else:
+            raise ValueError('No variables to be encoded')
+    
+        return x
+
+mlp_model = MLPModelTimeSeries(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
+                    n_output=2, _continuous_outcome=False)
+
+class CNNModelTimeSeries(nn.Module):
+    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, T=10,
+                 n_output=2, _continuous_outcome=False):
+        super().__init__()
+        self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
+        self.n_cont = n_cont
+
+        # conv layers
+        self.conv1 = nn.Conv1d(in_channels=self.n_emb + self.n_cont, out_channels=16, 
+                               kernel_size=5, padding='same')
+        self.conv2 = nn.Conv1d(in_channels=16, out_channels=32, 
+                               kernel_size=1)
+        self.conv3 = nn.Conv1d(in_channels=32, out_channels=1, 
+                               kernel_size=5, padding='same')  
+
+        # bn layers
+        self.bn1 = nn.BatchNorm1d(self.n_cont)
+        self.bn2 = nn.BatchNorm1d(16)
+        self.bn3 = nn.BatchNorm1d(32)
+
+        # dropout layers
+        self.emb_drop = nn.Dropout(0.6)
+        self.drop1 = nn.Dropout(0.3)
+        self.drop2 = nn.Dropout(0.3)
+
+    def _get_embedding_layers(self, model_cat_unique_levels):
+        # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
+        # decide embedding sizes
+        embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
+        embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
+        n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
+        # n_cont = dataset.x_cont.shape[1] # number of continuous variables
+
+        return embedding_layers, n_emb
+    
+    def forward(self, x_cat, x_cont, batched_nodes_indices=None):
+        # x_cat: [batch_size, num_cat_vars, T]
+        # x_cont: [batch_size, num_cont_vars, T]
+        # batched_nodex_indices: [batch_size]
+
+        x_cat_new = x_cat.permute(0, 2, 1)
+        # x_cat_new: [batch_size, T, num_cat_vars]
+
+        if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
+            x1 = [e(x_cat_new[:, :, 1]) for i, e in enumerate(self.embedding_layers)]
+            x1 = torch.cat(x1, -1) # [batch_size, T, n_emb]
+            x1 = self.emb_drop(x1)
+
+        if self.n_cont > 0: # if there are continuous variables to be encoded
+            x2 = self.bn1(x_cont).permute(0, 2, 1) # [batch_size, T, n_cont]
+        
+        if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
+            x = torch.cat([x1, x2], -1).permute(0, 2, 1) # [batch_size, T, n_emb + n_cont] -> [bathc_size, n_emb + n_cont, T]
+            x = F.relu(self.bn2(self.conv1(x))) # [batch_size, 16, T] 
+            x = self.drop1(x)
+            x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
+            x = self.drop2(x)
+            x = self.conv3(x) # [batch_size, 1, T]
+
+        elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
+            x = F.relu(self.bn2(self.conv1(x1.permute(0, 2, 1)))) # [batch_size, T, n_emb] -> [batch_size, n_emb, T] -> [batch_size, 16, T] 
+            x = self.drop1(x)
+            x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
+            x = self.drop2(x)
+            x = self.conv3(x) # [batch_size, 1, T]
+
+        elif len(self.embedding_layers) == 0 and self.n_cont > 0:
+            x = F.relu(self.bn2(self.conv1(x2.permute(0, 2, 1))))  # [batch_size, T, n_cont] -> [batch_size, n_cont, T] -> [batch_size, 16, T] 
+            x = self.drop1(x)
+            x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
+            x = self.drop2(x)
+            x = self.conv3(x) # [batch_size, 1, T]
+        else:
+            raise ValueError('No variables to be encoded')
+    
+        return x
+
+
+cnn_model = CNNModelTimeSeries(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
+                               n_output=2, _continuous_outcome=False)
+
+
+for cat_vars, cont_vars, labels, indices in loader:
+    # out = mlp_model(cat_vars, cont_vars)
+    out = cnn_model(cat_vars, cont_vars)
+    break
+
+out[0].shape
+
+out.shape
+
+
+mlp_model.embedding_layers
+
+for i, e in enumerate(mlp_model.embedding_layers):
+    print(cat_vars[:, i, :].permute(0, 2, 1).shape)
+
+dummy_A = torch.rand(4, 4)
+dummy_x = torch.rand(4, 16, 10).permute(1, 0, 2)
+out = torch.matmul(dummy_A, dummy_x)
+out.shape

@@ -11,14 +11,12 @@ class DfDataset(Dataset):
         ''' Retrieve train,label and pred data from Dataframe directly
         Args:  
             patsy_matrix_dataframe: pd.DataFrame, data, i.e., dataframe created from patsy.dmatrix()
-            model: str, model formula, i.e., _gi_model
             target: str, target variable, i.e., exposure/outcome
             model_cat_vars: list, categorical variables in patsy_matrix_dataframe, subset of cat_vars
             model_cont_vars: list, continuous variables in patsy_matrix_dataframe, subset of cont_vars
             model_cat_unique_levels: dict, number of unique levels for each categorical variable of patsy_matrix_dataframe, subset of cat_unique_levels
-
-        if fit is set to true, df should be data_to_fit; else, df should be data_to_predict
         '''
+        
         self.df = patsy_matrix_dataframe 
         self.target = target
         self.model_cat_vars, self.model_cont_vars, self.model_cat_unique_levels = model_cat_vars, model_cont_vars, model_cat_unique_levels
@@ -41,6 +39,49 @@ class DfDataset(Dataset):
 
     def __len__(self):
         return self.y.shape[0]
+
+class TimeSeriesDataset(Dataset):
+    def __init__(self, patsy_matrix_dataframe_list, target=None, use_all_time_slices=True, 
+                 model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
+        ''' Retrieve train, label and pred data from list of Dataframe directly
+        Args:  
+            patsy_matrix_dataframe_list: list, containing pd.DataFrame data, i.e., dataframe created from patsy.dmatrix()
+            target: str, target variable, i.e., exposure/outcome
+            use_all_time_slices: bool, use label data from all time slices, or only the last time slice, default: True
+            model_cat_vars: list, categorical variables in patsy_matrix_dataframe, subset of cat_vars
+            model_cont_vars: list, continuous variables in patsy_matrix_dataframe, subset of cont_vars
+            model_cat_unique_levels: dict, number of unique levels for each categorical variable of patsy_matrix_dataframe, subset of cat_unique_levels
+        '''
+        
+        # use numerical index to avoid looping inside _getitem_()
+        self.cat_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cat_vars)
+        self.cont_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cont_vars)
+        self.target_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], [target])
+
+        self.data_array = np.stack([df.to_numpy() for df in patsy_matrix_dataframe_list], axis=-1) 
+        # len(patsy_matrix_dataframe_list) = T
+        # self.data_array: [num_samples, num_features, T]
+
+        self.use_all_time_slices = use_all_time_slices
+
+    def _column_name_to_index(self, dataframe, column_name):
+        return dataframe.columns.get_indexer(column_name)
+    
+    def _get_labels(self):
+        return self.data_array[:, self.target, :]
+
+    def __getitem__(self, idx):
+        cat_vars = torch.from_numpy(self.data_array[idx, self.cat_col_index, :]).int() # [num_cat_vars, T]
+        cont_vars = torch.from_numpy(self.data_array[idx, self.cont_col_index, :]).float() # [num_cont_vars, T]
+        labels = torch.from_numpy(self.data_array[idx, self.target_col_index, :]).float().squeeze(0) # [1, T] -> [T]
+
+        if not self.use_all_time_slices:
+            labels = labels[-1] # [] 
+        
+        return cat_vars, cont_vars, labels, idx # idx shape []
+
+    def __len__(self):
+        return self.data_array.shape[0]
 
 ######################## split dataset and define loader ########################
 def get_dataloaders(dataset, split_ratio=[0.7, 0.1, 0.2], batch_size=16, shuffle=True):

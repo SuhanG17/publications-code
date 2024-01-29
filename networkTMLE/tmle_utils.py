@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import statsmodels.api as sm
-import torch
+from itertools import groupby
 
 
 def probability_to_odds(prob):
@@ -709,3 +709,48 @@ def outcome_deep_learner(deep_learner, xdata, ydata, outcome,
         return best_model_path, pred
     else:
         return pred
+
+
+# for time series data
+def all_equal(iterable):
+    '''check if all elements in a list are identical'''
+    g = groupby(iterable)
+    return next(g, True) and not next(g, False)
+
+def update_cat_var_unique_levels(cat_var_unique_levels_list):
+    '''update cat_var_unique_level to maintain the maximum level throughout all time slices'''
+    model_cat_unique_levels_final = {} 
+    for i, cat_var_level_dict in enumerate(cat_var_unique_levels_list):
+        for var_name, num_levels in cat_var_level_dict.items():
+            if i == 0:
+                model_cat_unique_levels_final[var_name] = num_levels
+            else:
+                if num_levels > model_cat_unique_levels_final[var_name]:
+                    model_cat_unique_levels_final[var_name] = num_levels 
+    return model_cat_unique_levels_final
+
+    
+def get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, model_cat_unique_levels_list):
+    '''1. check if categorical and continuous variables are consistent throughout time slices
+       2. update the categorical variables unique levels to maintain the maximum level throughout all time slices
+    '''
+    if not all_equal(model_cat_vars_list):
+        raise ValueError("cat_vars are not identical throughout time slices")
+    else:
+        model_cat_vars_final = model_cat_vars_list[-1]
+    
+    if not all_equal(model_cont_vars_list):
+        raise ValueError("cont_vars are not identical throughout time slices")
+    else:
+        model_cont_vars_final = model_cont_vars_list[-1]
+
+    if not all_equal(model_cat_unique_levels_list):
+        print(f'cat_vars levels are not identical througout time slices:')
+        print(model_cont_vars_final)
+        print(f'adopt the maximum levels for each variable:')
+        model_cat_unique_levels_final = update_cat_var_unique_levels(model_cat_unique_levels_list) 
+        print(model_cat_unique_levels_final)
+    else:
+        model_cat_unique_levels_final = model_cat_unique_levels_list[-1]
+    
+    return model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final
