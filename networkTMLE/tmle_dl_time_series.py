@@ -12,7 +12,8 @@ from scipy.stats.kde import gaussian_kde
 
 from tmle_utils import (network_to_df, fast_exp_map, exp_map_individual, tmle_unit_bounds, tmle_unit_unbound,
                         probability_to_odds, odds_to_probability, bounding,
-                        outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner, exposure_deep_learner, outcome_deep_learner,
+                        outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner, 
+                        exposure_deep_learner, outcome_deep_learner_ts,
                         targeting_step, create_threshold, create_categorical,
                         check_pooled_sample_levels, select_pooled_sample_with_observed_data,
                         get_model_cat_cont_split_patsy_matrix, append_target_to_df, get_probability_from_multilevel_prediction)
@@ -136,7 +137,7 @@ class NetworkTMLETimeSeries:
     def __init__(self, network_list, exposure, outcome, degree_restrict=None, alpha=0.05,
                  continuous_bound=0.0005, verbose=False,
                  cat_vars=[], cont_vars=[], cat_unique_levels={},
-                 use_deep_learner_A_i=False, use_deep_learner_A_i_s=False, use_deep_learner_outcome=False):
+                 use_deep_learner_A_i=False, use_deep_learner_A_i_s=False, use_deep_learner_outcome=False, use_all_time_slices=True):
         # initiate cat_vars, cont_vars and cat_unique_levels (SG_modified)
         self.cat_vars, self.cont_vars, self.cat_unique_levels = cat_vars, cont_vars, cat_unique_levels
 
@@ -327,6 +328,7 @@ class NetworkTMLETimeSeries:
         # Use deep learner for exposure or outcome nuisance model (SG_modified)
         self.use_deep_learner_A_i, self.use_deep_learner_A_i_s = use_deep_learner_A_i, use_deep_learner_A_i_s
         self.use_deep_learner_outcome = use_deep_learner_outcome
+        self.use_all_time_slices = use_all_time_slices
 
     def exposure_model(self, model, custom_model=None, custom_model_sim=None):
         """Exposure model for individual i.  Estimates Pr(A=a|W, W_map) using a logistic regression model.
@@ -476,24 +478,20 @@ class NetworkTMLETimeSeries:
         # Logic if custom_model is provided
         else:
             if self.use_deep_learner_outcome:
+                xdata_list = []
+                ydata_list = []
+                n_output_list = []
                 for df_restricted in self.df_restricted_list:
-                    xdata.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
-                ydata.append(self.df_restricted_list[-1][self.outcome])
-                n_output = pd.unique(ydata).shape[0]
+                    xdata_list.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
+                    ydata_list.append(df_restricted[self.outcome])
+                    n_output_list.append(pd.unique(df_restricted[self.outcome]).shape[0])
+
                 custom_path = 'outcome_' + self.outcome + '.pth'
                 self._q_custom_ = custom_model
-
-        
-
-                xdata = patsy.dmatrix(model + ' - 1', self.df_restricted, return_type="dataframe")
-                ydata = self.df_restricted[self.outcome] 
-                n_output = pd.unique(ydata).shape[0]
-                custom_path = 'outcome_' + self.outcome + '.pth'
-                self._q_custom_ = custom_model
-                self._q_custom_path_, self._Qinit_ = outcome_deep_learner(custom_model, 
-                                                                          xdata, ydata, self.outcome,
-                                                                          self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output, self._continuous_outcome,
-                                                                          predict_with_best=False, custom_path=custom_path)
+                self._q_custom_path_, self._Qinit_ = outcome_deep_learner_ts(custom_model, 
+                                                                             xdata_list, ydata_list, self.outcome, self.use_all_time_slices,
+                                                                             self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome,
+                                                                             predict_with_best=False, custom_path=custom_path)
             else:
                 # Extract data using the model
                 data = patsy.dmatrix(model + ' - 1',                      # Specified model WITHOUT an intercept
@@ -512,10 +510,10 @@ class NetworkTMLETimeSeries:
         # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
         if self._continuous_outcome:
             self._Qinit_ = np.where(self._Qinit_ < 0.,          # When lower than lower bound
-                                    0 + self._cb_,                         # ... set to lower bound
+                                    0 + self._cb_[-1],                         # ... set to lower bound
                                     self._Qinit_)                                  # ... otherwise keep
             self._Qinit_ = np.where(self._Qinit_ > 1.,          # When above the upper bound
-                                    1 - self._cb_,                         # ... set to upper bound
+                                    1 - self._cb_[-1],                         # ... set to upper bound
                                     self._Qinit_)                                  # ... otherwise keep
 
         # if self._continuous_outcome:
@@ -561,7 +559,7 @@ class NetworkTMLETimeSeries:
             raise ValueError("Input `p` must be float or container of floats")
 
         if type(p) != float:                                                     # Check if not a float
-            if len(p) != self.df.shape[0]:                                       # ... check length matches data shape
+            if len(p) != self.df_list[-1].shape[0]:                                       # ... check length matches data shape
                 raise ValueError("Vector of `p` must be same length as input data")
             if np.all(np.asarray(p) == 0) or np.all(np.asarray(p) == 1):         # ... check if deterministic plan
                 raise ValueError("Deterministic treatment plans not supported")
@@ -573,28 +571,37 @@ class NetworkTMLETimeSeries:
             if p < 0 or p > 1:                                                   # ... check if outside of prob bounds
                 raise ValueError("Probabilities for treatment must be between 0 and 1")
 
-        # Step 1) Estimate the weights
-        # Also generates pooled_data for use in the Monte Carlo integration procedure
-        self._resamples_ = samples                                                # Saving info on number of resamples
-        h_iptw, pooled_data_restricted = self._estimate_iptw_(p=p,                # Generate pooled & estiamte weights
-                                                              samples=samples,    # ... for some number of samples
-                                                              bound=bound,        # ... with applied probability bounds
-                                                              seed=seed)          # ... and with a random seed given
+        h_iptw_list = []
+        pooled_data_restricted_list = []
+        for df, network, df_restricted in zip(self.df_list, self.network_list, self.df_restricted_list):
 
-        # Saving some information for diagnostic procedures
-        if self._gs_measure_ is None:                                  # If no summary measure, use the A_sum
-            self._for_diagnostics_ = pooled_data_restricted[[self.exposure, self.exposure+"_sum"]].copy()
-        else:                                                          # Otherwise, use the provided summary measure
-            self._for_diagnostics_ = pooled_data_restricted[[self.exposure, self._gs_measure_]].copy()
+            # Step 1) Estimate the weights
+            # Also generates pooled_data for use in the Monte Carlo integration procedure
+            self._resamples_ = samples                                                # Saving info on number of resamples
+            h_iptw, pooled_data_restricted = self._estimate_iptw_per_slice_(df=df,
+                                                                            network=network,
+                                                                            df_restricted=df_restricted,
+                                                                            p=p,                # Generate pooled & estiamte weights
+                                                                            samples=samples,    # ... for some number of samples
+                                                                            bound=bound,        # ... with applied probability bounds
+                                                                            seed=seed)          # ... and with a random seed given
+            h_iptw_list.append(h_iptw)
+            pooled_data_restricted_list.append(pooled_data_restricted)
+
+            # Saving some information for diagnostic procedures
+            if self._gs_measure_ is None:                                  # If no summary measure, use the A_sum
+                self._for_diagnostics_ = pooled_data_restricted[[self.exposure, self.exposure+"_sum"]].copy()
+            else:                                                          # Otherwise, use the provided summary measure
+                self._for_diagnostics_ = pooled_data_restricted[[self.exposure, self._gs_measure_]].copy()
 
         # Step 2) Estimate from Q-model
         # process completed in .outcome_model() function and stored in self._Qinit_
         # so nothing to do here
 
         # Step 3) Target the parameter
-        epsilon = targeting_step(y=self.df_restricted[self.outcome],   # Estimate the targeting model given observed Y
+        epsilon = targeting_step(y=self.df_restricted_list[-1][self.outcome],   # Estimate the targeting model given observed Y
                                  q_init=self._Qinit_,                  # ... predicted values of Y under observed A
-                                 ipw=h_iptw,                           # ... weighted by IPW
+                                 ipw=h_iptw_list[-1],                           # ... weighted by IPW
                                  verbose=self._verbose_)               # ... with option for verbose info
 
         # Step 4) Monte Carlo integration (old code did in loop but faster as vector)
@@ -604,17 +611,24 @@ class NetworkTMLETimeSeries:
             y_star = self._outcome_model.predict(pooled_data_restricted)       # ... predict using statsmodels syntax
         else:  # Custom input model by user
             if self.use_deep_learner_outcome:
-                xdata = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted, return_type="dataframe")
-                ydata = pooled_data_restricted[self.outcome] 
-                n_output = pd.unique(ydata).shape[0]
-                y_star = outcome_deep_learner(self._q_custom_, xdata, ydata, self.outcome, 
-                                              self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output, self._continuous_outcome,
-                                              predict_with_best=True, custom_path=self._q_custom_path_)
+                xdata_list = []
+                ydata_list = []
+                n_output_list = []
+                for pooled_data_restricted in pooled_data_restricted_list:
+                    xdata_list.append(patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted, return_type="dataframe"))
+                    ydata_list.append(pooled_data_restricted[self.outcome])
+                    n_output_list.append(pd.unique(pooled_data_restricted[self.outcome]).shape[0])
+
+                y_star = outcome_deep_learner_ts(self._q_custom_, 
+                                                 xdata_list, ydata_list, self.outcome, self.use_all_time_slices,
+                                                 self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome,
+                                                 predict_with_best=True, custom_path=self._q_custom_path_)
             else:
                 d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted)  # ... extract data via patsy
                 y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,     # ... predict using custom function
                                                 xdata=np.asarray(d))              # ... for the extracted data
-
+        
+            pooled_data_restricted = pooled_data_restricted_list[-1] # set up pooled_data_restricted as the last time slice for further calculation
         # Ensure all predicted values are bounded properly for continuous
         # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
         if self._continuous_outcome:
@@ -645,32 +659,32 @@ class NetworkTMLETimeSeries:
 
         # Prep for variance
         if self._continuous_outcome:                                                 # Continuous needs bounds...
-            y_ = np.array(tmle_unit_unbound(self.df_restricted[self.outcome],        # Unbound observed outcomes for Var
+            y_ = np.array(tmle_unit_unbound(self.df_restricted_list[-1][self.outcome],        # Unbound observed outcomes for Var
                                             mini=self._continuous_min_,              # ... using min
                                             maxi=self._continuous_max_))             # ... and max values
             yq0_ = tmle_unit_unbound(self._Qinit_,                                   # Unbound g-comp predictions
                                      mini=self._continuous_min_,                     # ... using min
                                      maxi=self._continuous_max_)                     # ... and max values
         else:                                                                        # Otherwise nothing special...
-            y_ = np.array(self.df_restricted[self.outcome])                          # Observed outcome for Var
+            y_ = np.array(self.df_restricted_list[-1][self.outcome])                          # Observed outcome for Var
             yq0_ = self._Qinit_                                                      # Predicted outcome for Var
 
         # Step 5) Variance estimation
         zalpha = norm.ppf(1 - self.alpha / 2, loc=0, scale=1)      # Get corresponding Z-value based on desired alpha
 
         # Variance: direct-only, conditional on W variance
-        var_cond = self._est_variance_conditional_(iptw=h_iptw,                  # Estimate direct-only variance
-                                                   obs_y=y_,                     # ... observed value of Y
-                                                   pred_y=yq0_)                  # ... predicted value of Y
-        self.conditional_variance = var_cond                                     # Store the var estimate and CIs
+        var_cond = self._est_variance_conditional_(iptw=h_iptw_list[-1],                  # Estimate direct-only variance
+                                                   obs_y=y_,                              # ... observed value of Y
+                                                   pred_y=yq0_)                           # ... predicted value of Y
+        self.conditional_variance = var_cond                                              # Store the var estimate and CIs
         self.conditional_ci = [self.marginal_outcome - zalpha*np.sqrt(var_cond),
                                self.marginal_outcome + zalpha*np.sqrt(var_cond)]
 
         # Variance: direct and latent, conditional on W variance
-        var_lcond = self._est_variance_latent_conditional_(iptw=h_iptw,          # Estimate latent variance
-                                                           obs_y=y_,             # ... observed value of Y
-                                                           pred_y=yq0_,          # ... predicted value of Y
-                                                           adj_matrix=self.adj_matrix,
+        var_lcond = self._est_variance_latent_conditional_(iptw=h_iptw_list[-1],          # Estimate latent variance
+                                                           obs_y=y_,                      # ... observed value of Y
+                                                           pred_y=yq0_,                   # ... predicted value of Y
+                                                           adj_matrix=self.adj_matrix_list[-1],
                                                            excluded_ids=self._exclude_ids_degree_)
         self.conditional_latent_variance = var_lcond                             # Store variance estimate and CIs
         self.conditional_latent_ci = [self.marginal_outcome - zalpha*np.sqrt(var_lcond),
@@ -919,7 +933,7 @@ class NetworkTMLETimeSeries:
                            labels=[labels],             # ... with the specified labels
                            verbose=True)                # ... warns user if NaN's are being generated
 
-    def _estimate_iptw_(self, p, samples, bound, seed):
+    def _estimate_iptw_per_slice_(self, df, network, df_restricted, p, samples, bound, seed):
         """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
         of Causal Inference 2017
 
@@ -952,8 +966,8 @@ class NetworkTMLETimeSeries:
         """
         # Estimate the denominator if not previously estimated
         if not self._denominator_estimated_:
-            self._denominator_ = self._estimate_exposure_nuisance_(data_to_fit=self.df_restricted.copy(),
-                                                                   data_to_predict=self.df_restricted.copy(),
+            self._denominator_ = self._estimate_exposure_nuisance_(data_to_fit=df_restricted.copy(),
+                                                                   data_to_predict=df_restricted.copy(),
                                                                    distribution=self._map_dist_,
                                                                    verbose_label='Weight - Denominator',
                                                                    store_model=True,
@@ -962,9 +976,11 @@ class NetworkTMLETimeSeries:
             self._denominator_estimated_ = True  # Updates flag for denominator
 
         # Creating pooled sample to estimate weights
-        pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
-                                                 samples=samples,                          # ... for m samples
-                                                 seed=seed)                                # ... with a provided seed
+        pooled_df = self._generate_pooled_sample_per_slice(df=df,
+                                                           network=network,
+                                                           p=p,                                      # Generate data under policy
+                                                           samples=samples,                          # ... for m samples
+                                                           seed=seed)                                # ... with a provided seed
         pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
 
         # ensure pooled data contains all exposure levels in observed data
@@ -983,7 +999,7 @@ class NetworkTMLETimeSeries:
 
         # Estimate the numerator using the pooled data
         numerator = self._estimate_exposure_nuisance_(data_to_fit=pooled_data_restricted.copy(),
-                                                      data_to_predict=self.df_restricted.copy(),
+                                                      data_to_predict=df_restricted.copy(),
                                                       distribution=self._map_dist_,
                                                       verbose_label='Weight - Numerator',
                                                       store_model=False,
@@ -1000,7 +1016,7 @@ class NetworkTMLETimeSeries:
         # Return both the array of estimated weights and the generated pooled data set
         return iptw, pooled_data_restricted
 
-    def _generate_pooled_sample(self, p, samples, seed):
+    def _generate_pooled_sample_per_slice(self, df, network, p, samples, seed):
         """
 
         Note
@@ -1030,7 +1046,7 @@ class NetworkTMLETimeSeries:
         # this is also the best target for optimization since it takes about ~85% of current run times
 
         for s in range(samples):                                    # For each of the *m* samples
-            g = self.df.copy()                                      # Create a copy of the data
+            g = df.copy()                                      # Create a copy of the data
             probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
                                  p=p,                               # ... based on policy-assigned probabilities
                                  size=g.shape[0])                   # ... for the N units
@@ -1052,14 +1068,14 @@ class NetworkTMLETimeSeries:
 
             # Logic if no summary measure was specified (uses the complete factor approach)
             if self._gs_measure_ is None:
-                network = self.network.copy()                           # Copy the network
+                network = network.copy()                           # Copy the network
                 a = np.array(g[self.exposure])                          # Transform A_i into array
                 for n in network.nodes():                               # For each node,
                     network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
                 df = exp_map_individual(network,                        # Now do the individual exposure maps with new
                                         variable=self.exposure,
                                         max_degree=self._max_degree_).fillna(0)
-                for c in self._nonparam_cols_:                          # Adding back these np columns
+                for c in self._nonparam_cols_[-1]:                          # Adding back these np columns
                     g[c] = df[c]
 
             # Re-creating any threshold variables in the pooled sample data
@@ -1082,6 +1098,170 @@ class NetworkTMLETimeSeries:
 
         # Returning the pooled data set
         return pd.concat(pooled_sample, axis=0, ignore_index=True)
+
+    # def _estimate_iptw_(self, p, samples, bound, seed):
+    #     """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
+    #     of Causal Inference 2017
+
+    #     IPTW are estimated using the following process.
+
+    #     For the observed data, models are fit to estimate the Pr(A=a) for individual i (treating as IID data) and then
+    #     the Pr(A=a) for their contacts (treated as IID data). These probabilities are then multiplied together to
+    #     generate the denominator.
+
+    #     To calculate the numerator, the input data set is replicated `samples` times. To each of the data set copies,
+    #     the treatment plan is repeatedly applied. From this large set of observations under the stochastic treatment
+    #     plan of interest, models are again fit to the data, same as the prior procedure. The corresponding probabilities
+    #     are then multiplied together to generate the numerator.
+
+    #     Note: not implemented but the `deterministic` argument will use the following procedure. When a deterministic
+    #     treatment plan (like all-treat)vis input, only a single data set under the treatment plan is generated. This
+    #     saves computation time since all the replicate data sets would be equivalent. The deterministic part will be
+    #     resolved in an earlier procedure
+
+    #     Parameters
+    #     ----------
+    #     p : float, array
+    #         Probability of A_i as assigned by the policy
+    #     samples : int
+    #         Number of sampled data sets to generate
+    #     bound : None, int, float
+    #         Bounds to truncate calculate weights with
+    #     seed : None, int
+    #         Seed for pooled data set creation
+    #     """
+    #     # Estimate the denominator if not previously estimated
+    #     if not self._denominator_estimated_:
+    #         self._denominator_ = self._estimate_exposure_nuisance_(data_to_fit=self.df_restricted.copy(),
+    #                                                                data_to_predict=self.df_restricted.copy(),
+    #                                                                distribution=self._map_dist_,
+    #                                                                verbose_label='Weight - Denominator',
+    #                                                                store_model=True,
+    #                                                                custom_path_prefix='denom_',
+    #                                                                print_every=5)
+    #         self._denominator_estimated_ = True  # Updates flag for denominator
+
+    #     # Creating pooled sample to estimate weights
+    #     pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
+    #                                              samples=samples,                          # ... for m samples
+    #                                              seed=seed)                                # ... with a provided seed
+    #     pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
+
+    #     # ensure pooled data contains all exposure levels in observed data
+    #     if self.use_deep_learner_A_i_s:
+    #         regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
+    #         print(f'before while loop regenerate_flag: {regenerate_flag}')
+    #         while regenerate_flag:
+    #             print(f'regenerating pooled sample for {self._gs_measure_}')
+    #             pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
+    #                                                     samples=samples,                           # ... for m samples
+    #                                                     seed=seed)                                 # ... with a provided seed
+    #             pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
+    #             regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
+    #             print(f'in while loop regenerate_flag: {regenerate_flag}')
+    #             print()
+
+    #     # Estimate the numerator using the pooled data
+    #     numerator = self._estimate_exposure_nuisance_(data_to_fit=pooled_data_restricted.copy(),
+    #                                                   data_to_predict=self.df_restricted.copy(),
+    #                                                   distribution=self._map_dist_,
+    #                                                   verbose_label='Weight - Numerator',
+    #                                                   store_model=False,
+    #                                                   custom_path_prefix='num_',
+    #                                                   # kwargs
+    #                                                   batch_size=512,
+    #                                                   print_every=15)
+
+    #     # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
+    #     iptw = numerator / self._denominator_           # Divide numerator by denominator
+    #     if bound is not None:                           # If weight bound provided
+    #         iptw = bounding(ipw=iptw, bound=bound)      # ... apply the bound
+
+    #     # Return both the array of estimated weights and the generated pooled data set
+    #     return iptw, pooled_data_restricted
+
+    # def _generate_pooled_sample(self, p, samples, seed):
+    #     """
+
+    #     Note
+    #     ----
+    #     Vectorization doesn't work, since the matrix manipulations get extremely large (even when using
+    #     scipy.sparse.block_diag()). So here the loop is more efficient due to how the summary measures are being
+    #     calculated via matrix multiplication.
+
+    #     Parameters
+    #     ----------
+    #     p : float, array
+    #         Probability of A_i as assigned by the policy
+    #     samples : int
+    #         Number of sampled data sets to generate
+    #     seed : None, int
+    #         Seed for pooled data set creation
+
+    #     Returns
+    #     -------
+    #     dataframe
+    #         Pooled data set under applications of the policy omega
+    #     """
+    #     # Prep for pooled data set creation
+    #     rng = np.random.default_rng(seed)  # Setting the seed for bootstraps
+    #     pooled_sample = []
+    #     # TODO one way to potentially speed up code is to run this using Pool. Easy for parallel
+    #     # this is also the best target for optimization since it takes about ~85% of current run times
+
+    #     for s in range(samples):                                    # For each of the *m* samples
+    #         g = self.df.copy()                                      # Create a copy of the data
+    #         probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
+    #                              p=p,                               # ... based on policy-assigned probabilities
+    #                              size=g.shape[0])                   # ... for the N units
+    #         g[self.exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degree
+    #                                     g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
+
+    #         # Generating all summary measures based on the new exposure (could maybe avoid for all?)
+    #         g[self.exposure+'_sum'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='sum')
+    #         g[self.exposure + '_mean'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='mean')
+    #         g[self.exposure + '_mean'] = g[self.exposure + '_mean'].fillna(0)            # isolates should have mean=0
+    #         g[self.exposure + '_var'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='var')
+    #         g[self.exposure + '_var'] = g[self.exposure + '_var'].fillna(0)              # isolates should have mean=0
+    #         g[self.exposure + '_mean_dist'] = fast_exp_map(self.adj_matrix,
+    #                                                        np.array(g[self.exposure]), measure='mean_dist')
+    #         g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
+    #         g[self.exposure + '_var_dist'] = fast_exp_map(self.adj_matrix,
+    #                                                       np.array(g[self.exposure]), measure='var_dist')
+    #         g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
+
+    #         # Logic if no summary measure was specified (uses the complete factor approach)
+    #         if self._gs_measure_ is None:
+    #             network = self.network.copy()                           # Copy the network
+    #             a = np.array(g[self.exposure])                          # Transform A_i into array
+    #             for n in network.nodes():                               # For each node,
+    #                 network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
+    #             df = exp_map_individual(network,                        # Now do the individual exposure maps with new
+    #                                     variable=self.exposure,
+    #                                     max_degree=self._max_degree_).fillna(0)
+    #             for c in self._nonparam_cols_:                          # Adding back these np columns
+    #                 g[c] = df[c]
+
+    #         # Re-creating any threshold variables in the pooled sample data
+    #         if self._thresholds_any_:
+    #             create_threshold(data=g,
+    #                              variables=self._thresholds_variables_,
+    #                              thresholds=self._thresholds_,
+    #                              definitions=self._thresholds_def_)
+
+    #         # Re-creating any categorical variables in the pooled sample data
+    #         if self._categorical_any_:
+    #             create_categorical(data=g,
+    #                                variables=self._categorical_variables_,
+    #                                bins=self._categorical_,
+    #                                labels=self._categorical_def_,
+    #                                verbose=False)
+
+    #         g['_sample_id_'] = s         # Setting sample ID
+    #         pooled_sample.append(g)      # Adding to list (for later concatenate)
+
+    #     # Returning the pooled data set
+    #     return pd.concat(pooled_sample, axis=0, ignore_index=True)
 
     def _estimate_exposure_nuisance_(self, data_to_fit, data_to_predict, distribution, verbose_label, store_model, 
                                      custom_path_prefix=None, **kwargs):
@@ -1485,400 +1665,417 @@ class NetworkTMLETimeSeries:
 # model: how to apply GCN? 
 # consider how to modify AbstractML
 
-# load uniform vaccine network
-from beowulf import load_uniform_vaccine        
+# # load uniform vaccine network
+# from beowulf import load_uniform_vaccine        
 
-# load network_list
-from Beowulf.beowulf.dgm.vaccine_with_cat_cont_split import vaccine_dgm_time_series
+# # load network_list
+# from Beowulf.beowulf.dgm.vaccine_with_cat_cont_split import vaccine_dgm_time_series
 
-n_nodes = 500
-restrict = False
-exposure = "vaccine"
-outcome = "D"
-degree_restrict = None
-
-
-G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n_nodes, return_cat_cont_split=True)
-H, cat_vars, cont_vars, cat_unique_levels, network_list = vaccine_dgm_time_series(network=G, restricted=restrict, 
-                                                            update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
-
-ntmle = NetworkTMLETimeSeries(network_list, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
-                              cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
-
-ntmle.df_restricted_list
-
-################## inside outcome_model(): if self.use_deep_learner_outcome: ################## 
-model = "vaccine + vaccine_sum + A + H + A_sum + H_sum + degree"
-custom_model = None
+# n_nodes = 500
+# restrict = False
+# exposure = "vaccine"
+# outcome = "D"
+# degree_restrict = None
 
 
-xdata_list = []
-ydata_list = []
-n_output_list = []
+# G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n_nodes, return_cat_cont_split=True)
+# H, cat_vars, cont_vars, cat_unique_levels, network_list = vaccine_dgm_time_series(network=G, restricted=restrict, 
+#                                                             update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
 
-for df_restricted in ntmle.df_restricted_list:
-    xdata_list.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
-    ydata_list.append(df_restricted[ntmle.outcome])
-    # ydata.append(self.df_restricted_list[-1][self.outcome])
-    # n_output = pd.unique(ydata).shape[0]
-    n_output_list.append(pd.unique(df_restricted[ntmle.outcome]).shape[0])
-    custom_path = 'outcome_' + ntmle.outcome + '.pth'
-    ntmle._q_custom_ = custom_model
+# ntmle = NetworkTMLETimeSeries(network_list, exposure=exposure, outcome=outcome, degree_restrict=degree_restrict,
+#                               cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+
+# ntmle.df_restricted_list
+
+# ################## inside outcome_model(): if self.use_deep_learner_outcome: ################## 
+# model = "vaccine + vaccine_sum + A + H + A_sum + H_sum + degree"
+# custom_model = None
 
 
-from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df
+# xdata_list = []
+# ydata_list = []
+# n_output_list = []
 
-aa = []
-bb = []
-cc = []
-for xdata in xdata_list:
-    model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-                                                                                                                                            cat_vars, cont_vars, cat_unique_levels)
-    aa.append(model_cat_vars)
-    bb.append(model_cont_vars)
-    cc.append(model_cat_unique_levels)
+# for df_restricted in ntmle.df_restricted_list:
+#     xdata_list.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
+#     ydata_list.append(df_restricted[ntmle.outcome])
+#     # ydata.append(self.df_restricted_list[-1][self.outcome])
+#     # n_output = pd.unique(ydata).shape[0]
+#     n_output_list.append(pd.unique(df_restricted[ntmle.outcome]).shape[0])
+#     custom_path = 'outcome_' + ntmle.outcome + '.pth'
+#     ntmle._q_custom_ = custom_model
 
-# def check_identical(list):
+
+# from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df
+
+# aa = []
+# bb = []
+# cc = []
+# for xdata in xdata_list:
+#     model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+#                                                                                                                                             cat_vars, cont_vars, cat_unique_levels)
+#     aa.append(model_cat_vars)
+#     bb.append(model_cont_vars)
+#     cc.append(model_cat_unique_levels)
+
+# # def check_identical(list):
     
-#     return len(set(list)) == 1
+# #     return len(set(list)) == 1
 
-from itertools import groupby
+# from itertools import groupby
 
-def all_equal(iterable):
-    '''check if all elements in a list are identical'''
-    g = groupby(iterable)
-    return next(g, True) and not next(g, False)
-
-
-def update_cat_var_unique_levels(cat_var_unique_levels_list):
-    model_cat_unique_levels_final = {} 
-    for i, cat_var_level_dict in enumerate(cat_var_unique_levels_list):
-        for var_name, num_levels in cat_var_level_dict.items():
-            if i == 0:
-                model_cat_unique_levels_final[var_name] = num_levels
-            else:
-                if num_levels > model_cat_unique_levels_final[var_name]:
-                    model_cat_unique_levels_final[var_name] = num_levels 
-    return model_cat_unique_levels_final
+# def all_equal(iterable):
+#     '''check if all elements in a list are identical'''
+#     g = groupby(iterable)
+#     return next(g, True) and not next(g, False)
 
 
-if not all_equal(aa):
-    raise ValueError("cat_vars are not identical throughout time slices")
-else:
-    model_cat_vars_final = aa[-1]
-
-if not all_equal(bb):
-    raise ValueError("cont_vars are not identical throughout time slices")
-else:
-    model_cont_vars_final = bb[-1]
-
-if not all_equal(cc):
-    print(f'cat_vars levels are not identical througout time slices:')
-    print(cc)
-    print(f'adopt the maximum levels for each variable:')
-    model_cat_unique_levels_final = update_cat_var_unique_levels(cc) 
-    print(model_cat_unique_levels_final)
-else:
-    model_cat_unique_levels_final = cc[-1]
+# def update_cat_var_unique_levels(cat_var_unique_levels_list):
+#     model_cat_unique_levels_final = {} 
+#     for i, cat_var_level_dict in enumerate(cat_var_unique_levels_list):
+#         for var_name, num_levels in cat_var_level_dict.items():
+#             if i == 0:
+#                 model_cat_unique_levels_final[var_name] = num_levels
+#             else:
+#                 if num_levels > model_cat_unique_levels_final[var_name]:
+#                     model_cat_unique_levels_final[var_name] = num_levels 
+#     return model_cat_unique_levels_final
 
 
+# if not all_equal(aa):
+#     raise ValueError("cat_vars are not identical throughout time slices")
+# else:
+#     model_cat_vars_final = aa[-1]
+
+# if not all_equal(bb):
+#     raise ValueError("cont_vars are not identical throughout time slices")
+# else:
+#     model_cont_vars_final = bb[-1]
+
+# if not all_equal(cc):
+#     print(f'cat_vars levels are not identical througout time slices:')
+#     print(cc)
+#     print(f'adopt the maximum levels for each variable:')
+#     model_cat_unique_levels_final = update_cat_var_unique_levels(cc) 
+#     print(model_cat_unique_levels_final)
+# else:
+#     model_cat_unique_levels_final = cc[-1]
 
 
-# model_cat_unique_levels_final = update_cat_var_unique_levels(cc)
-# model_cat_unique_levels_final
-
-deep_learner_df_list = []
-for xdata, ydata in zip(xdata_list, ydata_list):
-    deep_learner_df_list.append(append_target_to_df(ydata, xdata, ntmle.outcome))
-
-len(deep_learner_df_list)
 
 
-import torch
-from torch.utils.data import Dataset, DataLoader
+# # model_cat_unique_levels_final = update_cat_var_unique_levels(cc)
+# # model_cat_unique_levels_final
 
-class TimeSeriesDataset(Dataset):
-    def __init__(self, patsy_matrix_dataframe_list, target=None, use_all_time_slices=True, 
-                 model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
+# deep_learner_df_list = []
+# for xdata, ydata in zip(xdata_list, ydata_list):
+#     deep_learner_df_list.append(append_target_to_df(ydata, xdata, ntmle.outcome))
+
+# len(deep_learner_df_list)
+
+
+# import torch
+# from torch.utils.data import Dataset, DataLoader
+
+# class TimeSeriesDataset(Dataset):
+#     def __init__(self, patsy_matrix_dataframe_list, target=None, use_all_time_slices=True, 
+#                  model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
         
-        # use numerical index to avoid looping inside _getitem_()
-        self.cat_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cat_vars)
-        self.cont_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cont_vars)
-        self.target_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], [target])
+#         # use numerical index to avoid looping inside _getitem_()
+#         self.cat_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cat_vars)
+#         self.cont_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], model_cont_vars)
+#         self.target_col_index = self._column_name_to_index(patsy_matrix_dataframe_list[-1], [target])
 
-        self.data_array = np.stack([df.to_numpy() for df in patsy_matrix_dataframe_list], axis=-1) 
-        # len(patsy_matrix_dataframe_list) = T
-        # self.data_array: [num_samples, num_features, T]
+#         self.data_array = np.stack([df.to_numpy() for df in patsy_matrix_dataframe_list], axis=-1) 
+#         # len(patsy_matrix_dataframe_list) = T
+#         # self.data_array: [num_samples, num_features, T]
 
-        self.use_all_time_slices = use_all_time_slices
+#         self.use_all_time_slices = use_all_time_slices
 
-    def _column_name_to_index(self, dataframe, column_name):
-        return dataframe.columns.get_indexer(column_name)
+#     def _column_name_to_index(self, dataframe, column_name):
+#         return dataframe.columns.get_indexer(column_name)
     
-    def _get_labels(self):
-        return self.data_array[:, self.target, :]
+#     def _get_labels(self):
+#         return self.data_array[:, self.target, :]
 
-    def __getitem__(self, idx):
-        cat_vars = torch.from_numpy(self.data_array[idx, self.cat_col_index, :]).int() # [num_cat_vars, T]
-        cont_vars = torch.from_numpy(self.data_array[idx, self.cont_col_index, :]).float() # [num_cont_vars, T]
-        labels = torch.from_numpy(self.data_array[idx, self.target_col_index, :]).float().squeeze(0) # [1, T] -> [T]
+#     def __getitem__(self, idx):
+#         cat_vars = torch.from_numpy(self.data_array[idx, self.cat_col_index, :]).int() # [num_cat_vars, T]
+#         cont_vars = torch.from_numpy(self.data_array[idx, self.cont_col_index, :]).float() # [num_cont_vars, T]
+#         labels = torch.from_numpy(self.data_array[idx, self.target_col_index, :]).float().squeeze(0) # [1, T] -> [T]
 
-        if not self.use_all_time_slices:
-            labels = labels[-1] # [] 
+#         if not self.use_all_time_slices:
+#             labels = labels[-1] # [] 
         
-        return cat_vars, cont_vars, labels, idx # idx shape []
+#         return cat_vars, cont_vars, labels, idx # idx shape []
 
-    def __len__(self):
-        return self.data_array.shape[0]
+#     def __len__(self):
+#         return self.data_array.shape[0]
 
-ts_dset = TimeSeriesDataset(deep_learner_df_list, ntmle.outcome, use_all_time_slices=True,
-                            model_cat_vars=model_cat_vars_final, 
-                            model_cont_vars=model_cont_vars_final, 
-                            model_cat_unique_levels=model_cat_unique_levels_final)
+# ts_dset = TimeSeriesDataset(deep_learner_df_list, ntmle.outcome, use_all_time_slices=True,
+#                             model_cat_vars=model_cat_vars_final, 
+#                             model_cont_vars=model_cont_vars_final, 
+#                             model_cat_unique_levels=model_cat_unique_levels_final)
 
-ts_dset = TimeSeriesDataset(deep_learner_df_list, ntmle.outcome, use_all_time_slices=False,
-                            model_cat_vars=model_cat_vars_final, 
-                            model_cont_vars=model_cont_vars_final, 
-                            model_cat_unique_levels=model_cat_unique_levels_final)
+# ts_dset = TimeSeriesDataset(deep_learner_df_list, ntmle.outcome, use_all_time_slices=False,
+#                             model_cat_vars=model_cat_vars_final, 
+#                             model_cont_vars=model_cont_vars_final, 
+#                             model_cat_unique_levels=model_cat_unique_levels_final)
 
-cat_dummy, cont_dummy, label_dummy, idx_dummy = ts_dset.__getitem__(0)
+# cat_dummy, cont_dummy, label_dummy, idx_dummy = ts_dset.__getitem__(0)
 
-len(ts_dset)
+# len(ts_dset)
 
-cat_dummy.shape
-cont_dummy.shape
-label_dummy.shape
-label_dummy
-idx_dummy.shape
-
-
-loader = DataLoader(ts_dset, batch_size=4, shuffle=True)
+# cat_dummy.shape
+# cont_dummy.shape
+# label_dummy.shape
+# label_dummy
+# idx_dummy.shape
 
 
-for cat_vars, cont_vars, labels, idices in loader:
-    print(cat_vars.shape)
-    print(cont_vars.shape)
-    print(labels.shape)
-    print(idices.shape)
-    break
+# loader = DataLoader(ts_dset, batch_size=4, shuffle=True)
 
 
-from dl_models import MLPModel
-mlp_model = MLPModel(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
-                    n_output=2, _continuous_outcome=False)
-
-import torch.nn as nn
-import torch.nn.functional as F
-
-
-class MLPModelTimeSeries(nn.Module):
-    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, T=10,
-                 n_output=2, _continuous_outcome=False):
-        super().__init__()
-        self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
-        self.n_cont = n_cont
-
-        # variable dimension feature extraction
-        self.lin1 = nn.Linear(self.n_emb + self.n_cont, 16)
-        self.lin2 = nn.Linear(16, 32)
-        # if use BCEloss, number of output should be 1, i.e. the probability of getting category 1
-        # else number of output should be as specified
-        if n_output == 2 or _continuous_outcome:
-            self.lin3 = nn.Linear(32, 1) 
-        else:
-            self.lin3 = nn.Linear(32, n_output)
-        self.bn1 = nn.BatchNorm1d(self.n_cont)
-        self.bn2 = nn.BatchNorm1d(16)
-        self.bn3 = nn.BatchNorm1d(32)
-        self.emb_drop = nn.Dropout(0.6)
-        self.drops = nn.Dropout(0.3)
-
-        # time dimension feature extract 
-        self.ts_lin1 = nn.Linear(T, 16)
-        self.ts_lin2 = nn.Linear(16, T)
+# for cat_vars, cont_vars, labels, idices in loader:
+#     print(cat_vars.shape)
+#     print(cont_vars.shape)
+#     print(labels.shape)
+#     print(idices.shape)
+#     break
 
 
-    def _get_embedding_layers(self, model_cat_unique_levels):
-        # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
-        # decide embedding sizes
-        embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
-        embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
-        n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
-        # n_cont = dataset.x_cont.shape[1] # number of continuous variables
+# from dl_models import MLPModel
+# mlp_model = MLPModel(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
+#                     n_output=2, _continuous_outcome=False)
 
-        return embedding_layers, n_emb
+# import torch.nn as nn
+# import torch.nn.functional as F
+
+
+# class MLPModelTimeSeries(nn.Module):
+#     def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, T=10,
+#                  n_output=2, _continuous_outcome=False):
+#         super().__init__()
+#         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
+#         self.n_cont = n_cont
+
+#         # variable dimension feature extraction
+#         self.lin1 = nn.Linear(self.n_emb + self.n_cont, 16)
+#         self.lin2 = nn.Linear(16, 32)
+#         # if use BCEloss, number of output should be 1, i.e. the probability of getting category 1
+#         # else number of output should be as specified
+#         if n_output == 2 or _continuous_outcome:
+#             self.lin3 = nn.Linear(32, 1) 
+#         else:
+#             self.lin3 = nn.Linear(32, n_output)
+#         self.bn1 = nn.BatchNorm1d(self.n_cont)
+#         self.bn2 = nn.BatchNorm1d(16)
+#         self.bn3 = nn.BatchNorm1d(32)
+#         self.emb_drop = nn.Dropout(0.6)
+#         self.drops = nn.Dropout(0.3)
+
+#         # time dimension feature extract 
+#         self.ts_lin1 = nn.Linear(T, 16)
+#         self.ts_lin2 = nn.Linear(16, T)
+
+
+#     def _get_embedding_layers(self, model_cat_unique_levels):
+#         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
+#         # decide embedding sizes
+#         embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
+#         embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
+#         n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
+#         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
+
+#         return embedding_layers, n_emb
     
-    def forward(self, x_cat, x_cont, batched_nodes_indices=None):
-        # x_cat: [batch_size, num_cat_vars, T]
-        # x_cont: [batch_size, num_cont_vars, T]
-        # batched_nodex_indices: [batch_size]
+#     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
+#         # x_cat: [batch_size, num_cat_vars, T]
+#         # x_cont: [batch_size, num_cont_vars, T]
+#         # batched_nodex_indices: [batch_size]
 
-        x_cat_new = x_cat.permute(0, 2, 1)
-        # x_cat_new: [batch_size, T, num_cat_vars]
+#         x_cat_new = x_cat.permute(0, 2, 1)
+#         # x_cat_new: [batch_size, T, num_cat_vars]
 
-        if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
-            x1 = [e(x_cat_new[:, :, 1]) for i, e in enumerate(self.embedding_layers)]
-            x1 = torch.cat(x1, -1) # [batch_size, T, n_emb]
-            x1 = self.emb_drop(x1)
+#         if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
+#             x1 = [e(x_cat_new[:, :, 1]) for i, e in enumerate(self.embedding_layers)]
+#             x1 = torch.cat(x1, -1) # [batch_size, T, n_emb]
+#             x1 = self.emb_drop(x1)
 
-        if self.n_cont > 0: # if there are continuous variables to be encoded
-            x2 = self.bn1(x_cont).permute(0, 2, 1) # [batch_size, T, n_cont]
+#         if self.n_cont > 0: # if there are continuous variables to be encoded
+#             x2 = self.bn1(x_cont).permute(0, 2, 1) # [batch_size, T, n_cont]
         
-        if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
-            x = torch.cat([x1, x2], -1) # [batch_size, T, n_emb + n_cont]
-            # temporal perspective
-            x = F.relu(self.ts_lin1(x.permute(0, 2, 1))).permute(0, 2, 1) 
-            # [batch_size, T, n_emb + n_cont] -> [batch_size, n_emb + n_cont, T] 
-            # -> [batch_size, n_emb + n_cont, 16] -> [batch_size, 16, n_emb + n_cont]
+#         if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
+#             x = torch.cat([x1, x2], -1) # [batch_size, T, n_emb + n_cont]
+#             # temporal perspective
+#             x = F.relu(self.ts_lin1(x.permute(0, 2, 1))).permute(0, 2, 1) 
+#             # [batch_size, T, n_emb + n_cont] -> [batch_size, n_emb + n_cont, T] 
+#             # -> [batch_size, n_emb + n_cont, 16] -> [batch_size, 16, n_emb + n_cont]
 
-            # variable perspective
-            x = F.relu(self.lin1(x)) # [batch_size, 16, n_emb + n_cont] -> [batch_size, 16, 16]
-            x = self.drops(x)       
-            x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1) 
-            # [batch_size, 16(ts_c), 16(v_c)] -> [batch_size, 16(v_c), 16(ts_c)] ->  [batch_size, 16(ts_c), 16(v_c)]
-            x = F.relu(self.lin2(x)) # [batch_size, 16, 16] -> [batch_size, 16, 32] 
-            x = self.drops(x)
-            x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
-            # [batch_size, 16, 32] -> [batch_size, 32, 16] -> [batch_size, 16, 32
-            x = self.lin3(x)         # [batch_size, 16, 32] -> [batch_size, 16, 1]
+#             # variable perspective
+#             x = F.relu(self.lin1(x)) # [batch_size, 16, n_emb + n_cont] -> [batch_size, 16, 16]
+#             x = self.drops(x)       
+#             x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1) 
+#             # [batch_size, 16(ts_c), 16(v_c)] -> [batch_size, 16(v_c), 16(ts_c)] ->  [batch_size, 16(ts_c), 16(v_c)]
+#             x = F.relu(self.lin2(x)) # [batch_size, 16, 16] -> [batch_size, 16, 32] 
+#             x = self.drops(x)
+#             x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
+#             # [batch_size, 16, 32] -> [batch_size, 32, 16] -> [batch_size, 16, 32
+#             x = self.lin3(x)         # [batch_size, 16, 32] -> [batch_size, 16, 1]
 
-            # temporal perspective
-            x = self.ts_lin2(x.permute(0, 2, 1))
-            # [batch_size, 16, 1] -> [batch_size, 1, 16] -> [batch_size, 1, T] 
+#             # temporal perspective
+#             x = self.ts_lin2(x.permute(0, 2, 1))
+#             # [batch_size, 16, 1] -> [batch_size, 1, 16] -> [batch_size, 1, T] 
 
-        elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
-            # temporal perspective
-            x = self.ts_lin1(x1.permute(0, 2, 1)).permute(0, 2, 1)
-            # variable perspective
-            x = F.relu(self.lin1(x))
-            x = self.drops(x)       
-            x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1)
-            x = F.relu(self.lin2(x))
-            x = self.drops(x)
-            x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
-            x = self.lin3(x)
-            # temporal perspective
-            x = self.ts_lin2(x.permute(0, 2, 1))
+#         elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
+#             # temporal perspective
+#             x = self.ts_lin1(x1.permute(0, 2, 1)).permute(0, 2, 1)
+#             # variable perspective
+#             x = F.relu(self.lin1(x))
+#             x = self.drops(x)       
+#             x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1)
+#             x = F.relu(self.lin2(x))
+#             x = self.drops(x)
+#             x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
+#             x = self.lin3(x)
+#             # temporal perspective
+#             x = self.ts_lin2(x.permute(0, 2, 1))
 
-        elif len(self.embedding_layers) == 0 and self.n_cont > 0:
-            # temporal perspective
-            x = self.ts_lin1(x2.permute(0, 2, 1)).permute(0, 2, 1)
-            # variable perspective
-            x = F.relu(self.lin1(x))
-            x = self.drops(x)       
-            x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1)
-            x = F.relu(self.lin2(x))
-            x = self.drops(x)
-            x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
-            x = self.lin3(x)
-            # temporal perspective
-            x = self.ts_lin2(x.permute(0, 2, 1))
-        else:
-            raise ValueError('No variables to be encoded')
+#         elif len(self.embedding_layers) == 0 and self.n_cont > 0:
+#             # temporal perspective
+#             x = self.ts_lin1(x2.permute(0, 2, 1)).permute(0, 2, 1)
+#             # variable perspective
+#             x = F.relu(self.lin1(x))
+#             x = self.drops(x)       
+#             x = self.bn2(x.permute(0, 2, 1)).permute(0, 2, 1)
+#             x = F.relu(self.lin2(x))
+#             x = self.drops(x)
+#             x = self.bn3(x.permute(0, 2, 1)).permute(0, 2, 1)
+#             x = self.lin3(x)
+#             # temporal perspective
+#             x = self.ts_lin2(x.permute(0, 2, 1))
+#         else:
+#             raise ValueError('No variables to be encoded')
     
-        return x
+#         return x
 
-mlp_model = MLPModelTimeSeries(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
-                    n_output=2, _continuous_outcome=False)
+# mlp_model = MLPModelTimeSeries(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
+#                     n_output=2, _continuous_outcome=False)
 
-class CNNModelTimeSeries(nn.Module):
-    def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, T=10,
-                 n_output=2, _continuous_outcome=False):
-        super().__init__()
-        self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
-        self.n_cont = n_cont
+# class CNNModelTimeSeries(nn.Module):
+#     def __init__(self, adj_matrix, model_cat_unique_levels, n_cont, T=10,
+#                  n_output=2, _continuous_outcome=False):
+#         super().__init__()
+#         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
+#         self.n_cont = n_cont
 
-        # conv layers
-        self.conv1 = nn.Conv1d(in_channels=self.n_emb + self.n_cont, out_channels=16, 
-                               kernel_size=5, padding='same')
-        self.conv2 = nn.Conv1d(in_channels=16, out_channels=32, 
-                               kernel_size=1)
-        self.conv3 = nn.Conv1d(in_channels=32, out_channels=1, 
-                               kernel_size=5, padding='same')  
+#         # conv layers
+#         self.conv1 = nn.Conv1d(in_channels=self.n_emb + self.n_cont, out_channels=16, 
+#                                kernel_size=5, padding='same')
+#         self.conv2 = nn.Conv1d(in_channels=16, out_channels=32, 
+#                                kernel_size=1)
+#         self.conv3 = nn.Conv1d(in_channels=32, out_channels=1, 
+#                                kernel_size=5, padding='same')  
 
-        # bn layers
-        self.bn1 = nn.BatchNorm1d(self.n_cont)
-        self.bn2 = nn.BatchNorm1d(16)
-        self.bn3 = nn.BatchNorm1d(32)
+#         # bn layers
+#         self.bn1 = nn.BatchNorm1d(self.n_cont)
+#         self.bn2 = nn.BatchNorm1d(16)
+#         self.bn3 = nn.BatchNorm1d(32)
 
-        # dropout layers
-        self.emb_drop = nn.Dropout(0.6)
-        self.drop1 = nn.Dropout(0.3)
-        self.drop2 = nn.Dropout(0.3)
+#         # dropout layers
+#         self.emb_drop = nn.Dropout(0.6)
+#         self.drop1 = nn.Dropout(0.3)
+#         self.drop2 = nn.Dropout(0.3)
 
-    def _get_embedding_layers(self, model_cat_unique_levels):
-        # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
-        # decide embedding sizes
-        embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
-        embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
-        n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
-        # n_cont = dataset.x_cont.shape[1] # number of continuous variables
+#     def _get_embedding_layers(self, model_cat_unique_levels):
+#         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
+#         # decide embedding sizes
+#         embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
+#         embedding_layers = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
+#         n_emb = sum(e.embedding_dim for e in embedding_layers) # length of all embeddings combined
+#         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
 
-        return embedding_layers, n_emb
+#         return embedding_layers, n_emb
     
-    def forward(self, x_cat, x_cont, batched_nodes_indices=None):
-        # x_cat: [batch_size, num_cat_vars, T]
-        # x_cont: [batch_size, num_cont_vars, T]
-        # batched_nodex_indices: [batch_size]
+#     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
+#         # x_cat: [batch_size, num_cat_vars, T]
+#         # x_cont: [batch_size, num_cont_vars, T]
+#         # batched_nodex_indices: [batch_size]
 
-        x_cat_new = x_cat.permute(0, 2, 1)
-        # x_cat_new: [batch_size, T, num_cat_vars]
+#         x_cat_new = x_cat.permute(0, 2, 1)
+#         # x_cat_new: [batch_size, T, num_cat_vars]
 
-        if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
-            x1 = [e(x_cat_new[:, :, 1]) for i, e in enumerate(self.embedding_layers)]
-            x1 = torch.cat(x1, -1) # [batch_size, T, n_emb]
-            x1 = self.emb_drop(x1)
+#         if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
+#             x1 = [e(x_cat_new[:, :, 1]) for i, e in enumerate(self.embedding_layers)]
+#             x1 = torch.cat(x1, -1) # [batch_size, T, n_emb]
+#             x1 = self.emb_drop(x1)
 
-        if self.n_cont > 0: # if there are continuous variables to be encoded
-            x2 = self.bn1(x_cont).permute(0, 2, 1) # [batch_size, T, n_cont]
+#         if self.n_cont > 0: # if there are continuous variables to be encoded
+#             x2 = self.bn1(x_cont).permute(0, 2, 1) # [batch_size, T, n_cont]
         
-        if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
-            x = torch.cat([x1, x2], -1).permute(0, 2, 1) # [batch_size, T, n_emb + n_cont] -> [bathc_size, n_emb + n_cont, T]
-            x = F.relu(self.bn2(self.conv1(x))) # [batch_size, 16, T] 
-            x = self.drop1(x)
-            x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
-            x = self.drop2(x)
-            x = self.conv3(x) # [batch_size, 1, T]
+#         if len(self.embedding_layers) > 0 and self.n_cont > 0: # if there are both categorical and continuous variables to be encoded 
+#             x = torch.cat([x1, x2], -1).permute(0, 2, 1) # [batch_size, T, n_emb + n_cont] -> [bathc_size, n_emb + n_cont, T]
+#             x = F.relu(self.bn2(self.conv1(x))) # [batch_size, 16, T] 
+#             x = self.drop1(x)
+#             x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
+#             x = self.drop2(x)
+#             x = self.conv3(x) # [batch_size, 1, T]
 
-        elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
-            x = F.relu(self.bn2(self.conv1(x1.permute(0, 2, 1)))) # [batch_size, T, n_emb] -> [batch_size, n_emb, T] -> [batch_size, 16, T] 
-            x = self.drop1(x)
-            x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
-            x = self.drop2(x)
-            x = self.conv3(x) # [batch_size, 1, T]
+#         elif len(self.embedding_layers) > 0 and self.n_cont == 0: 
+#             x = F.relu(self.bn2(self.conv1(x1.permute(0, 2, 1)))) # [batch_size, T, n_emb] -> [batch_size, n_emb, T] -> [batch_size, 16, T] 
+#             x = self.drop1(x)
+#             x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
+#             x = self.drop2(x)
+#             x = self.conv3(x) # [batch_size, 1, T]
 
-        elif len(self.embedding_layers) == 0 and self.n_cont > 0:
-            x = F.relu(self.bn2(self.conv1(x2.permute(0, 2, 1))))  # [batch_size, T, n_cont] -> [batch_size, n_cont, T] -> [batch_size, 16, T] 
-            x = self.drop1(x)
-            x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
-            x = self.drop2(x)
-            x = self.conv3(x) # [batch_size, 1, T]
-        else:
-            raise ValueError('No variables to be encoded')
+#         elif len(self.embedding_layers) == 0 and self.n_cont > 0:
+#             x = F.relu(self.bn2(self.conv1(x2.permute(0, 2, 1))))  # [batch_size, T, n_cont] -> [batch_size, n_cont, T] -> [batch_size, 16, T] 
+#             x = self.drop1(x)
+#             x = F.relu(self.bn3(self.conv2(x))) # [batch_size, 32, T]
+#             x = self.drop2(x)
+#             x = self.conv3(x) # [batch_size, 1, T]
+#         else:
+#             raise ValueError('No variables to be encoded')
     
-        return x
+#         return x
 
 
-cnn_model = CNNModelTimeSeries(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
-                               n_output=2, _continuous_outcome=False)
+# cnn_model = CNNModelTimeSeries(None, model_cat_unique_levels_final, n_cont=len(model_cont_vars), 
+#                                n_output=2, _continuous_outcome=False)
 
 
-for cat_vars, cont_vars, labels, indices in loader:
-    # out = mlp_model(cat_vars, cont_vars)
-    out = cnn_model(cat_vars, cont_vars)
-    break
+# for cat_vars, cont_vars, labels, indices in loader:
+#     # out = mlp_model(cat_vars, cont_vars)
+#     out = cnn_model(cat_vars, cont_vars)
+#     break
 
-out[0].shape
+# out[0].shape
 
-out.shape
+# out.shape
 
 
-mlp_model.embedding_layers
+# mlp_model.embedding_layers
 
-for i, e in enumerate(mlp_model.embedding_layers):
-    print(cat_vars[:, i, :].permute(0, 2, 1).shape)
+# for i, e in enumerate(mlp_model.embedding_layers):
+#     print(cat_vars[:, i, :].permute(0, 2, 1).shape)
 
-dummy_A = torch.rand(4, 4)
-dummy_x = torch.rand(4, 16, 10).permute(1, 0, 2)
-out = torch.matmul(dummy_A, dummy_x)
-out.shape
+# dummy_A = torch.rand(4, 4)
+# dummy_x = torch.rand(4, 16, 10).permute(1, 0, 2)
+# out = torch.matmul(dummy_A, dummy_x)
+# out.shape
+
+# import torch
+# dummy_y = torch.randint(4, 10, (4, 10))
+# dummy_y.shape
+# tmp = dummy_y.float()
+# tmp.shape
+
+# a = torch.randn(4, 4)
+# a
+# _, predicted = torch.max(a, 1)
+# predicted.shape
+
+# aa = torch.randn(4, 1)
+# pred = torch.sigmoid(aa)
+# pred.shape
+# pred = torch.round(pred)
+# pred.shape

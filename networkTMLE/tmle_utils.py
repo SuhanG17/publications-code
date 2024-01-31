@@ -754,3 +754,102 @@ def get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, mo
         model_cat_unique_levels_final = model_cat_unique_levels_list[-1]
     
     return model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final
+
+def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, outcome, use_all_time_slices,
+                            adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output_list, _continuous_outcome,
+                            predict_with_best=False, custom_path=None):
+    """Internal function to fit custom_models for the outcome nuisance model.
+
+    Parameters
+    ----------
+    deep_learner :
+        instance of the deep learning model
+    xdata_list : list of pd.dataframe
+        list of Covariate data to fit the model with, len() = T
+    ydata : list of pandas.core.series.Series
+        list of Outcome data to fit the model with, len() = T
+    outcome: string
+        outcome patamerter to predict
+    use_all_time_slices: bool
+        if use outcome data from all time slices to train the model
+    adj_matrix: SciPy sparse array
+        adjacency matrix for GCN model
+    cat_vars: list
+        list of categorical variables for df_restricted, not xdata
+    cont_vars: list
+        list of continuous variables for df_restricted, not xdata
+    cat_unique_levles: dict
+        dictionary of categorical variables and their unique levels for df_restricted, not xdata
+    n_output_list: list of int
+        list of number of levels in output layer, 2 for binary, multilevel as specified; len() = T
+    _continuous_outcome: bool
+        if the outcome is continuous, default is False
+    predict_with_best: bool
+        if use the best model to predict, default is False
+    custom_path: string
+        path to saved best model, if different from model.save_path
+
+    Returns
+    -------
+    model_object
+        best model fitted
+    array
+        Predicted values for the outcome (probability if binary, and expected value otherwise)
+    """
+    T = len(xdata_list)
+
+    # Re-arrange data
+    model_cat_vars_list = []
+    model_cont_vars_list = []
+    model_cat_unique_levels_list = []
+
+    cat_vars_list = []
+    cont_vars_list = []
+    cat_unique_levels_list = []
+
+    deep_learner_df_list = []
+
+    for xdata, ydata in zip(xdata_list, ydata_list):
+        model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
+                                                                                                                                                 cat_vars, cont_vars, cat_unique_levels)
+        model_cat_vars_list.append(model_cat_vars)
+        model_cont_vars_list.append(model_cont_vars)
+        model_cat_unique_levels_list.append(model_cat_unique_levels)
+
+        cat_vars_list.append(cat_vars)
+        cont_vars_list.append(cont_vars)
+        cat_unique_levels_list.append(cat_unique_levels)
+
+        deep_learner_df_list.append(append_target_to_df(ydata, xdata, outcome))
+    
+    model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final = get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, model_cat_unique_levels_list)
+
+
+    ## check if n_output is consistent 
+    if not all_equal(n_output_list):
+        raise ValueError("n_output are not identical throughout time slices")
+    else:
+        n_output_final = n_output_list[-1]    
+            
+    if not predict_with_best:
+        # Fitting model
+        best_model_path = deep_learner.fit(deep_learner_df_list, outcome, use_all_time_slices, T,
+                                           adj_matrix, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
+                                           n_output_final, _continuous_outcome, custom_path=custom_path)
+
+    # Generating predictions
+    pred = deep_learner.predict(deep_learner_df_list, outcome, use_all_time_slices, T,
+                                adj_matrix, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
+                                n_output=n_output_final, _continuous_outcome=_continuous_outcome, custom_path=custom_path)
+    pred = np.concatenate(pred, 0) 
+    # [[batch_size, n_output, T], [batch_size, n_output, T] ...] -> [sample_size, n_output, T]
+    if n_output_final == 2 or _continuous_outcome: # binary classification with BCEloss / continuous outcome
+        pred = pred.squeeze(1) # [sample_size, 1, T] -> [sample_size, T]
+        pred = pred[:, -1] # only return the last time slice
+    else:
+        pred = get_probability_from_multilevel_prediction(pred[:, :, -1], ydata_list[-1]) # only return the last time slice
+
+    if not predict_with_best:
+        return best_model_path, pred
+    else:
+        return pred

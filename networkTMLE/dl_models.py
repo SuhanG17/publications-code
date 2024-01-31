@@ -497,4 +497,4 @@ class CNNModelTimeSeries(nn.Module):
         else:
             raise ValueError('No variables to be encoded')
     
-        return x    
+        return x
