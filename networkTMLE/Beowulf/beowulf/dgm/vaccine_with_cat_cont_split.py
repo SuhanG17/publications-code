@@ -123,6 +123,8 @@ def vaccine_dgm_time_series(network, restricted=False,
     if update_split:
         cat_vars.append('vaccine')
         cat_unique_levels['vaccine'] = pd.unique(data['vaccine'].astype('int')).max() + 1
+        # cat_vars.append('D') # outcome variable D is generated using _outbreak_time_series()
+        # cat_unique_levels['D'] = pd.unique(network_to_df(graph)['D'].astype('int')).max() + 1
         return graph, cat_vars, cont_vars, cat_unique_levels, graph_saved_by_time
     else:
         return graph, graph_saved_by_time

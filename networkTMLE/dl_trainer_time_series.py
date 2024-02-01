@@ -595,9 +595,18 @@ if __name__ == '__main__':
     # tmle = NetworkTMLE(H, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
     #                    cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
     #                    use_deep_learner_A_i_s=True)
+
+    # tmle = NetworkTMLETimeSeries(network_list, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
+    #                              cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                              use_deep_learner_outcome=True) 
+    
+    # tmle = NetworkTMLETimeSeries(network_list, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
+    #                              cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+    #                              use_deep_learner_A_i=True, use_deep_learner_outcome=True) 
+    
     tmle = NetworkTMLETimeSeries(network_list, exposure='vaccine', outcome='D', verbose=False, degree_restrict=(0, 18),
                                  cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                                 use_deep_learner_outcome=True) 
+                                 use_deep_learner_A_i=True, use_deep_learner_A_i_s=True, use_deep_learner_outcome=True) 
 
     # instantiation of deep learning model
     # 5 fold cross validation 
@@ -606,24 +615,40 @@ if __name__ == '__main__':
     # device = 'cpu'
     print(device)
 
-    deep_learner = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-                         epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    deep_learner_a_i = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                             epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    deep_learner_a_i_s = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                                 epochs=10, print_every=5, device=device, save_path='./tmp.pth')    
+    deep_learner_outcome = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                                 epochs=10, print_every=5, device=device, save_path='./tmp.pth')                                    
     # deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
     #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
     
-    tmle.exposure_model("A + H + H_mean + degree")
-    # tmle.exposure_model("A + H + H_mean + degree", custom_model=deep_learner) # use_deep_learner_A_i=True
-    tmle.exposure_map_model("vaccine + A + H + H_mean + degree",
-                            measure='sum', distribution='poisson')
+    # tmle.exposure_model("A + H + H_mean + degree")
+    tmle.exposure_model("A + H + H_mean + degree", custom_model=deep_learner_a_i) # use_deep_learner_A_i=True
     # tmle.exposure_map_model("vaccine + A + H + H_mean + degree",
-    #                         measure='sum', distribution='poisson', custom_model=deep_learner)  # use_deep_learner_A_i_s=True
+                            # measure='sum', distribution='poisson')
+    tmle.exposure_map_model("vaccine + A + H + H_mean + degree",
+                            measure='sum', distribution='poisson', custom_model=deep_learner_a_i_s)  # use_deep_learner_A_i_s=True
     # tmle.outcome_model("vaccine + vaccine_mean + A + H + A_mean + H_mean + degree")
-    tmle.outcome_model("vaccine + vaccine_mean + A + H + A_mean + H_mean + degree", custom_model=deep_learner) # use_deep_learner_outcome=True
+    tmle.outcome_model("vaccine + vaccine_mean + A + H + A_mean + H_mean + degree", custom_model=deep_learner_outcome) # use_deep_learner_outcome=True
     tmle.fit(p=0.55, bound=0.01)
     tmle.summary()
     
     # # ############################# scratch #################################
-    # tmle.df_restricted.columns
+    # tmle.df_restricted_list[-1].columns
+    # pd.unique(tmle.df_restricted_list[-1]['D'])
+    # tmle.cat_vars
+    # cat_vars
+    # cont_vars
+
+    # h_iptw, pooled_data_restricted_list = tmle._estimate_iptw_ts_(p=0.55,                      # Generate pooled & estiamte weights
+    #                                                               samples=100,           # ... for some number of samples
+    #                                                               bound=None,               # ... with applied probability bounds
+    #                                                               seed=None)
+
+    # len(pooled_data_restricted_list)
+
     # tmle.df_restricted['diet_t3']
     # tmle.df_restricted['diet_t3'].value_counts()
     # tmle.df_restricted['bmi']
@@ -922,130 +947,130 @@ if __name__ == '__main__':
     # type(pooled_data_restricted[tmle._gs_measure_])
     # type(dummy_target)
 
-    import random
-    import numpy as np
-    import pandas as pd
-    import networkx as nx
-    from scipy.stats import logistic
+    # import random
+    # import numpy as np
+    # import pandas as pd
+    # import networkx as nx
+    # from scipy.stats import logistic
 
-    from beowulf.dgm.utils import (network_to_df, fast_exp_map, exposure_restrictions,
-                                odds_to_probability, probability_to_odds)
+    # from beowulf.dgm.utils import (network_to_df, fast_exp_map, exposure_restrictions,
+    #                             odds_to_probability, probability_to_odds)
     
-    from beowulf import load_uniform_vaccine, load_random_vaccine
+    # from beowulf import load_uniform_vaccine, load_random_vaccine
 
-    n=500
+    # n=500
 
-    # uniform
-    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
-
-
-    # params
-    network = G
-    restricted = False
-    time_limit = 10
-    inf_duration = 5
-    update_split = True
+    # # uniform
+    # G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
 
 
-    graph = network.copy()
-    data = network_to_df(graph)
+    # # params
+    # network = G
+    # restricted = False
+    # time_limit = 10
+    # inf_duration = 5
+    # update_split = True
 
-    adj_matrix = nx.adjacency_matrix(graph, weight=None)
-    data['A_sum'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='sum')
-    data['A_mean'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='mean')
-    data['H_sum'] = fast_exp_map(adj_matrix, np.array(data['H']), measure='sum')
-    data = pd.merge(data, pd.DataFrame.from_dict(dict(network.degree),
-                                                 orient='index').rename(columns={0: 'F'}),
-                    how='left', left_index=True, right_index=True)
 
-    # Running Data Generating Mechanism for A
-    pr_a = logistic.cdf(-1.9 + 1.75*data['A'] + 1.*data['H']
-                        + 1.*data['H_sum'] + 1.3*data['A_sum'] - 0.65*data['F'])
-    vaccine = np.random.binomial(n=1, p=pr_a, size=nx.number_of_nodes(graph))
-    data['vaccine'] = vaccine
-    if restricted:  # if we are in the restricted scenarios
-        attrs = exposure_restrictions(network=network.graph['label'], exposure='vaccine',
-                                      n=nx.number_of_nodes(graph))
-        data.update(pd.DataFrame(list(attrs.values()), index=list(attrs.keys()), columns=['vaccine']))
+    # graph = network.copy()
+    # data = network_to_df(graph)
 
-    # print("Pr(V):", np.mean(vaccine))
-    for n in graph.nodes():
-        graph.nodes[n]['vaccine'] = int(data.loc[data.index == n, 'vaccine'].values)
+    # adj_matrix = nx.adjacency_matrix(graph, weight=None)
+    # data['A_sum'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='sum')
+    # data['A_mean'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='mean')
+    # data['H_sum'] = fast_exp_map(adj_matrix, np.array(data['H']), measure='sum')
+    # data = pd.merge(data, pd.DataFrame.from_dict(dict(network.degree),
+    #                                              orient='index').rename(columns={0: 'F'}),
+    #                 how='left', left_index=True, right_index=True)
+
+    # # Running Data Generating Mechanism for A
+    # pr_a = logistic.cdf(-1.9 + 1.75*data['A'] + 1.*data['H']
+    #                     + 1.*data['H_sum'] + 1.3*data['A_sum'] - 0.65*data['F'])
+    # vaccine = np.random.binomial(n=1, p=pr_a, size=nx.number_of_nodes(graph))
+    # data['vaccine'] = vaccine
+    # if restricted:  # if we are in the restricted scenarios
+    #     attrs = exposure_restrictions(network=network.graph['label'], exposure='vaccine',
+    #                                   n=nx.number_of_nodes(graph))
+    #     data.update(pd.DataFrame(list(attrs.values()), index=list(attrs.keys()), columns=['vaccine']))
+
+    # # print("Pr(V):", np.mean(vaccine))
+    # for n in graph.nodes():
+    #     graph.nodes[n]['vaccine'] = int(data.loc[data.index == n, 'vaccine'].values)
     
-    # inside outbreak
-    duration = inf_duration
-    limit = time_limit
-    # Adding node attributes
-    for n, d in graph.nodes(data=True):
-        d['D'] = 0
-        d['R'] = 0
-        d['t'] = 0
+    # # inside outbreak
+    # duration = inf_duration
+    # limit = time_limit
+    # # Adding node attributes
+    # for n, d in graph.nodes(data=True):
+    #     d['D'] = 0
+    #     d['R'] = 0
+    #     d['t'] = 0
 
-    # Selecting initial infections
-    all_ids = [n for n in graph.nodes()]
-    # infected = random.sample(all_ids, 5)
-    if len(all_ids) <= 500:
-        infected = [4, 36, 256, 305, 443]
-    elif len(all_ids) == 1000:
-        infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946]
-    elif len(all_ids) == 2000:
-        infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946,
-                    1112, 1204, 1243, 1253, 1283, 1339, 1352, 1376, 1558, 1702]
-    else:
-        raise ValueError("Invalid network IDs")
+    # # Selecting initial infections
+    # all_ids = [n for n in graph.nodes()]
+    # # infected = random.sample(all_ids, 5)
+    # if len(all_ids) <= 500:
+    #     infected = [4, 36, 256, 305, 443]
+    # elif len(all_ids) == 1000:
+    #     infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946]
+    # elif len(all_ids) == 2000:
+    #     infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946,
+    #                 1112, 1204, 1243, 1253, 1283, 1339, 1352, 1376, 1558, 1702]
+    # else:
+    #     raise ValueError("Invalid network IDs")
 
-    # Running through infection cycle
-    graph_by_time = []
-    time = 0
-    while time < limit:  # Simulate outbreaks until time-step limit is reached
-        time += 1
-        for inf in sorted(infected, key=lambda _: random.random()):
-            # Book-keeping for infected nodes
-            graph.nodes[inf]['D'] = 1
-            graph.nodes[inf]['t'] += 1
-            if graph.nodes[inf]['t'] > duration:
-                graph.nodes[inf]['I'] = 0         # Node is no longer infectious after this loop
-                graph.nodes[inf]['R'] = 1         # Node switches to Recovered
-                infected.remove(inf)
+    # # Running through infection cycle
+    # graph_by_time = []
+    # time = 0
+    # while time < limit:  # Simulate outbreaks until time-step limit is reached
+    #     time += 1
+    #     for inf in sorted(infected, key=lambda _: random.random()):
+    #         # Book-keeping for infected nodes
+    #         graph.nodes[inf]['D'] = 1
+    #         graph.nodes[inf]['t'] += 1
+    #         if graph.nodes[inf]['t'] > duration:
+    #             graph.nodes[inf]['I'] = 0         # Node is no longer infectious after this loop
+    #             graph.nodes[inf]['R'] = 1         # Node switches to Recovered
+    #             infected.remove(inf)
 
-            # Attempt infections of neighbors
-            for contact in nx.neighbors(graph, inf):
-                if graph.nodes[contact]["D"] == 1:
-                    pass
-                else:
-                    pr_y = logistic.cdf(- 2.5
-                                        - 1.0*graph.nodes[contact]['vaccine']
-                                        - 0.2*graph.nodes[inf]['vaccine']
-                                        + 1.0*graph.nodes[contact]['A']
-                                        - 0.2*graph.nodes[contact]['H'])
-                    if np.random.binomial(n=1, p=pr_y, size=1):
-                        graph.nodes[contact]['I'] = 1
-                        graph.nodes[contact]["D"] = 1
-                        infected.append(contact)
-        graph_by_time.append(graph.copy()) # save all variables and nodes for each time point
+    #         # Attempt infections of neighbors
+    #         for contact in nx.neighbors(graph, inf):
+    #             if graph.nodes[contact]["D"] == 1:
+    #                 pass
+    #             else:
+    #                 pr_y = logistic.cdf(- 2.5
+    #                                     - 1.0*graph.nodes[contact]['vaccine']
+    #                                     - 0.2*graph.nodes[inf]['vaccine']
+    #                                     + 1.0*graph.nodes[contact]['A']
+    #                                     - 0.2*graph.nodes[contact]['H'])
+    #                 if np.random.binomial(n=1, p=pr_y, size=1):
+    #                     graph.nodes[contact]['I'] = 1
+    #                     graph.nodes[contact]["D"] = 1
+    #                     infected.append(contact)
+    #     graph_by_time.append(graph.copy()) # save all variables and nodes for each time point
     
-    len(graph_by_time)
-    graph_by_time[0]
+    # len(graph_by_time)
+    # graph_by_time[0]
 
-    data_0 = network_to_df(graph_by_time[0])
-    data_0
-    data_1 = network_to_df(graph_by_time[1])
-    data_1
+    # data_0 = network_to_df(graph_by_time[0])
+    # data_0
+    # data_1 = network_to_df(graph_by_time[1])
+    # data_1
 
-    for i in range(len(graph_by_time)):
-        print(network_to_df(graph_by_time[i]))
+    # for i in range(len(graph_by_time)):
+    #     print(network_to_df(graph_by_time[i]))
 
-    tmp = network_to_df(graph_by_time[-1])
-    tmp['I'].fillna(2., inplace=True)
-    tmp
+    # tmp = network_to_df(graph_by_time[-1])
+    # tmp['I'].fillna(2., inplace=True)
+    # tmp
 
-    pd.unique(network_to_df(graph_by_time[-1])['I'])
-    pd.unique(network_to_df(graph_by_time[-1])['t'])
-    pd.unique(network_to_df(graph_by_time[-1])['D'])
-    pd.unique(network_to_df(graph_by_time[-1])['R'])
-    pd.unique(network_to_df(graph_by_time[-1])['vaccine'])
-    pd.unique(network_to_df(graph_by_time[-1])['A'])
-    pd.unique(network_to_df(graph_by_time[-1])['H'])
+    # pd.unique(network_to_df(graph_by_time[-1])['I'])
+    # pd.unique(network_to_df(graph_by_time[-1])['t'])
+    # pd.unique(network_to_df(graph_by_time[-1])['D'])
+    # pd.unique(network_to_df(graph_by_time[-1])['R'])
+    # pd.unique(network_to_df(graph_by_time[-1])['vaccine'])
+    # pd.unique(network_to_df(graph_by_time[-1])['A'])
+    # pd.unique(network_to_df(graph_by_time[-1])['H'])
 
     ''' 
     'D' represents during the time_limit, have this individual ever been infected;

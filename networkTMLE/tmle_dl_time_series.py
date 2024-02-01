@@ -13,7 +13,7 @@ from scipy.stats.kde import gaussian_kde
 from tmle_utils import (network_to_df, fast_exp_map, exp_map_individual, tmle_unit_bounds, tmle_unit_unbound,
                         probability_to_odds, odds_to_probability, bounding,
                         outcome_learner_fitting, outcome_learner_predict, exposure_machine_learner, 
-                        exposure_deep_learner, outcome_deep_learner_ts,
+                        exposure_deep_learner_ts, outcome_deep_learner_ts,
                         targeting_step, create_threshold, create_categorical,
                         check_pooled_sample_levels, select_pooled_sample_with_observed_data,
                         get_model_cat_cont_split_patsy_matrix, append_target_to_df, get_probability_from_multilevel_prediction)
@@ -143,38 +143,38 @@ class NetworkTMLETimeSeries:
 
         # Checking for some common problems that should provide errors
         for network in network_list:
-            if not all([isinstance(x, int) for x in list(network.nodes())]):   # Check if all node IDs are integers
-                raise ValueError("NetworkTMLE requires that "                  # ... possibly not needed?
+            if not all([isinstance(x, int) for x in list(network.nodes())]):                    # Check if all node IDs are integers
+                raise ValueError("NetworkTMLE requires that "                                   # ... possibly not needed?
                                 "all node IDs must be integers")
         for network in network_list:
-            if nx.number_of_selfloops(network) > 0:                            # Check for any self-loops in the network
-                raise ValueError("NetworkTMLE does not support networks "      # ... self-loops don't make sense in this
-                                "with self-loops")                             # ... setting
+            if nx.number_of_selfloops(network) > 0:                                             # Check for any self-loops in the network
+                raise ValueError("NetworkTMLE does not support networks "                       # ... self-loops don't make sense in this
+                                "with self-loops")                                              # ... setting
 
         # Checking for a specified degree restriction
-        if degree_restrict is not None:                                    # not-None means apply a restriction
-            self._check_degree_restrictions_(bounds=degree_restrict)       # ... checks if valid degree restriction
-            self._max_degree_ = [degree_restrict[1]]*len(network_list)     # ... extract max degree as upper bound
-        else:                                                              # otherwise if no restriction(s)
-            if nx.is_directed(network):                                    # ... directed max degree is max out-degree
-                self._max_degree_ = [np.max([d for n, d in network.out_degree]) for network in network_list]
-            else:                                                          # ... undirected max degree is max degree
-                self._max_degree_ = [np.max([d for n, d in network.degree]) for network in network_list]
+        if degree_restrict is not None:                                                         # not-None means apply a restriction
+            self._check_degree_restrictions_(bounds=degree_restrict)                            # ... checks if valid degree restriction
+            self._max_degree_list_ = [degree_restrict[1]]*len(network_list)                     # ... extract max degree as upper bound
+        else:                                                                                   # otherwise if no restriction(s)
+            if nx.is_directed(network):                                                         # ... directed max degree is max out-degree
+                self._max_degree_list_ = [np.max([d for n, d in network.out_degree]) for network in network_list]
+            else:                                                                               # ... undirected max degree is max degree
+                self._max_degree_list_ = [np.max([d for n, d in network.degree]) for network in network_list]
 
         # Generate a fresh copy of the network with ascending node order
-        oid = "_original_id_"                                              # Name to save the original IDs
+        oid = "_original_id_"                                                                   # Name to save the original IDs
         labeled_network_list = []
         for network in network_list:
-            network = nx.convert_node_labels_to_integers(network,              # Copy of new network with new labels
-                                                        first_label=0,        # ... start at 0 for latent variance calc
-                                                        label_attribute=oid)  # ... saving the original ID labels
-            labeled_network_list.append(network)                               # ... saving to list
+            network = nx.convert_node_labels_to_integers(network,                               # Copy of new network with new labels
+                                                        first_label=0,                          #  ... start at 0 for latent variance calc
+                                                        label_attribute=oid)                    # ... saving the original ID labels
+            labeled_network_list.append(network)                                                # ... saving to list
 
         # Saving processed data copies
-        # self.network = network                       # Network with correct re-labeling
-        self.network_list = labeled_network_list     # List of networks with correct re-labeling
-        self.exposure = exposure                     # Exposure column / attribute name
-        self.outcome = outcome                       # Outcome column / attribute name
+        # self.network = network                                                                # Network with correct re-labeling
+        self.network_list = labeled_network_list                                                # List of networks with correct re-labeling
+        self.exposure = exposure                                                                # Exposure column / attribute name
+        self.outcome = outcome                                                                  # Outcome column / attribute name
 
         # Background processing to convert network attribute data to pandas DataFrame
         self.adj_matrix_list = [nx.adjacency_matrix(network, weight=None) for network in self.network_list]
@@ -190,52 +190,52 @@ class NetworkTMLETimeSeries:
                                 "currently")
 
         # Manage outcome data based on variable type
-        self._continuous_outcome = []                                  
-        self._cb_ = []                                                 
-        self._continuous_min_ = []                                     
-        self._continuous_max_ = []                                    
+        self._continuous_outcome_list_ = []                                  
+        self._cb_list_ = []                                                 
+        self._continuous_min_list_ = []                                     
+        self._continuous_max_list_ = []                                    
         
         for i in range(len(df_list)):  
-            if df_list[i][outcome].dropna().value_counts().index.isin([0, 1]).all():  # Binary outcomes
-                self._continuous_outcome.append(False)                                # ... mark as binary outcome
-                self._cb_.append(0.0)                                                 # ... set continuous bound to be zero
-                self._continuous_min_.append(0.0)                                     # ... saving binary min bound
-                self._continuous_max_.append(1.0)                                     # ... saving binary max bound
-            else:                                                                     # Continuous outcomes
-                self._continuous_outcome.append(True)                                 # ... mark as continuous outcome
-                self._cb_.append(continuous_bound)                                    # ... save continuous bound value
-                self._continuous_min_.append(np.min(df_list[i][outcome]) - self._cb_) # ... determine min (with bound)
-                self._continuous_max_.append(np.max(df_list[i][outcome]) + self._cb_) # ... determine max (with bound)
-                df_list[i][outcome] = tmle_unit_bounds(y=df_list[i][self.outcome],    # ... bound the outcomes to be (0,1)
-                                                       mini=self._continuous_min_,
-                                                       maxi=self._continuous_max_)
+            if df_list[i][outcome].dropna().value_counts().index.isin([0, 1]).all():                # Binary outcomes
+                self._continuous_outcome_list_.append(False)                                        # ... mark as binary outcome
+                self._cb_list_.append(0.0)                                                          # ... set continuous bound to be zero
+                self._continuous_min_list_.append(0.0)                                              # ... saving binary min bound
+                self._continuous_max_list_.append(1.0)                                              # ... saving binary max bound
+            else:                                                                                   # Continuous outcomes
+                self._continuous_outcome_list_.append(True)                                         # ... mark as continuous outcome
+                self._cb_list_.append(continuous_bound)                                             # ... save continuous bound value
+                self._continuous_min_list_.append(np.min(df_list[i][outcome]) - self._cb_list_[i])  # ... determine min (with bound)
+                self._continuous_max_list_.append(np.max(df_list[i][outcome]) + self._cb_list_[i])  # ... determine max (with bound)
+                df_list[i][outcome] = tmle_unit_bounds(y=df_list[i][self.outcome],                  # ... bound the outcomes to be (0,1)
+                                                       mini=self._continuous_min_list_[i],
+                                                       maxi=self._continuous_max_list_[i])
 
         # Creating summary measure mappings for all variables in the network
-        summary_types = ['sum', 'mean', 'var', 'mean_dist', 'var_dist']                         # Default summary measures available
-        handle_isolates = ['mean', 'var', 'mean_dist', 'var_dist']                              # Whether isolates produce nan's
+        summary_types = ['sum', 'mean', 'var', 'mean_dist', 'var_dist']                             # Default summary measures available
+        handle_isolates = ['mean', 'var', 'mean_dist', 'var_dist']                                  # Whether isolates produce nan's
         for i in range(len(df_list)):         
-            for v in [var for var in list(df_list[i].columns) if var not in [oid, outcome]]:    # All cols besides ID and outcome
-                v_vector = np.asarray(df_list[i][v])                                            # ... extract array of column
-                for summary_measure in summary_types:                                           # ... for each summary measure
-                    df_list[i][v+'_'+summary_measure] = fast_exp_map(self.adj_matrix_list[i],   # ... calculate corresponding measure
+            for v in [var for var in list(df_list[i].columns) if var not in [oid, outcome]]:        # All cols besides ID and outcome
+                v_vector = np.asarray(df_list[i][v])                                                # ... extract array of column
+                for summary_measure in summary_types:                                               # ... for each summary measure
+                    df_list[i][v+'_'+summary_measure] = fast_exp_map(self.adj_matrix_list[i],       # ... calculate corresponding measure
                                                                      v_vector,
                                                                      measure=summary_measure)
-                    if summary_measure in handle_isolates:                                      # ... set isolates from nan to 0
+                    if summary_measure in handle_isolates:                                          # ... set isolates from nan to 0
                         df_list[i][v+'_'+summary_measure] = df_list[i][v+'_'+summary_measure].fillna(0)
                     
                     if v+'_'+summary_measure not in self.cont_vars:
-                        self.cont_vars.append(v+'_'+summary_measure)                            # ... add to continuous variables (SG_modified)
+                        self.cont_vars.append(v+'_'+summary_measure)                                # ... add to continuous variables (SG_modified)
 
         # Creating summary measure mappings for non-parametric exposure_map_model()
         self._nonparam_cols_ = []
         for i in range(len(self.network_list)):
-            exp_map_cols = exp_map_individual(network=self.network_list[i],               # Generate columns of indicator
-                                              variable=exposure,             # ... for the exposure
-                                              max_degree=self._max_degree_[i])  # ... up to the maximum degree
-            self._nonparam_cols_.append(list(exp_map_cols.columns))                # Save column list for estimation procedure
-            df_list[i] = pd.merge(df_list[i],                                                # Merge these columns into main data
-                                  exp_map_cols.fillna(0),                            # set nan to 0 to keep same dimension across i
-                                  how='left', left_index=True, right_index=True)     # Merge on index to left
+            exp_map_cols = exp_map_individual(network=self.network_list[i],                         # Generate columns of indicator
+                                              variable=exposure,                                    # ... for the exposure
+                                              max_degree=self._max_degree_list_[i])                 # ... up to the maximum degree
+            self._nonparam_cols_.append(list(exp_map_cols.columns))                                 # Save column list for estimation procedure
+            df_list[i] = pd.merge(df_list[i],                                                       # Merge these columns into main data
+                                  exp_map_cols.fillna(0),                                           # set nan to 0 to keep same dimension across i
+                                  how='left', left_index=True, right_index=True)                    # Merge on index to left
 
         # Assign all mappings variables  (SG_modified)
         # summary measures are consistent throughout time, hence all var names can be added to self.cat_vars/cont_vars
@@ -245,7 +245,7 @@ class NetworkTMLETimeSeries:
             self.cat_vars.extend(self._nonparam_cols_[-1]) # add all mappings to categorical variables
 
             for i in range(len(self._nonparam_cols_)):
-                if i == 0: # init with the first time point values
+                if i == 0: # init with the first time slice values
                     for col in self._nonparam_cols_[i]:
                         self.cat_unique_levels[col] = pd.unique(df_list[i][col].astype('int')).max() + 1
                 else: # update when bigger degree is encountered
@@ -268,9 +268,9 @@ class NetworkTMLETimeSeries:
             else:                                                                                       # For undirected networks...
                 degree_data = pd.DataFrame.from_dict(dict(self.network_list[i].degree),                 # ... use the regular degree
                                                      orient='index').rename(columns={0: 'degree'})
-            self.df_list[i] = pd.merge(df_list[i],                                                         # Merge main data
-                                       degree_data,                                                        # ...with degree data
-                                       how='left', left_index=True, right_index=True)                      # ...based on index
+            self.df_list[i] = pd.merge(df_list[i],                                                      # Merge main data
+                                       degree_data,                                                     # ...with degree data
+                                       how='left', left_index=True, right_index=True)                   # ...based on index
         
         # Assign degree variables (SG_modified)
         self.cat_vars.append('degree')
@@ -452,7 +452,7 @@ class NetworkTMLETimeSeries:
 
         # Running through logic for custom models
         if custom_model is None:                                           # If no custom model
-            if not self._continuous_outcome:                               # and not continuous
+            if not self._continuous_outcome_list_[-1]:                     # and not continuous
                 f = sm.families.family.Binomial()                          # ... use logit regression
             elif distribution.lower() == 'normal':                         # or use distribution normal
                 f = sm.families.family.Gaussian()                          # ... use OLS
@@ -464,10 +464,10 @@ class NetworkTMLETimeSeries:
                                  " is not currently supported")
 
             # Estimate outcome model and predicted Y with the observed network data
-            self._outcome_model = smf.glm(self.outcome + ' ~ ' + self._q_model,   # Specified model form
-                                          self.df_restricted,                     # ... fit to restricted data
-                                          family=f).fit()                         # ... for given GLM family
-            self._Qinit_ = self._outcome_model.predict(self.df_restricted)        # Predict outcome values
+            self._outcome_model = smf.glm(self.outcome + ' ~ ' + self._q_model,            # Specified model form
+                                          self.df_restricted_list[-1],                     # ... fit to restricted data
+                                          family=f).fit()                                  # ... for given GLM family
+            self._Qinit_ = self._outcome_model.predict(self.df_restricted_list[-1])        # Predict outcome values
 
             # If verbose is requested, output the relevant information
             if self._verbose_:
@@ -490,39 +490,39 @@ class NetworkTMLETimeSeries:
                 self._q_custom_ = custom_model
                 self._q_custom_path_, self._Qinit_ = outcome_deep_learner_ts(custom_model, 
                                                                              xdata_list, ydata_list, self.outcome, self.use_all_time_slices,
-                                                                             self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome,
+                                                                             self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
                                                                              predict_with_best=False, custom_path=custom_path)
             else:
                 # Extract data using the model
-                data = patsy.dmatrix(model + ' - 1',                      # Specified model WITHOUT an intercept
-                                    self.df_restricted)                  # ... using the degree restricted data
+                data = patsy.dmatrix(model + ' - 1',                              # Specified model WITHOUT an intercept
+                                    self.df_restricted_list[-1])                  # ... using the degree restricted data
 
                 # Estimating custom_model
-                self._q_custom_ = outcome_learner_fitting(ml_model=custom_model,       # User-specified model
-                                                        xdata=np.asarray(data),      # Extracted X data
-                                                        ydata=np.asarray(self.df_restricted[self.outcome]))
+                self._q_custom_ = outcome_learner_fitting(ml_model=custom_model,                                    # User-specified model
+                                                          xdata=np.asarray(data),                                   # Extracted X data
+                                                          ydata=np.asarray(self.df_restricted_list[self.outcome]))
 
                 # Generating predictions
                 self._Qinit_ = outcome_learner_predict(ml_model_fit=self._q_custom_,   # Fit custom_model
-                                                    xdata=np.asarray(data))         # Observed X data
+                                                       xdata=np.asarray(data))         # Observed X data
 
         # Ensures all predicted values are bounded: 
         # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
-        if self._continuous_outcome:
-            self._Qinit_ = np.where(self._Qinit_ < 0.,          # When lower than lower bound
-                                    0 + self._cb_[-1],                         # ... set to lower bound
-                                    self._Qinit_)                                  # ... otherwise keep
-            self._Qinit_ = np.where(self._Qinit_ > 1.,          # When above the upper bound
-                                    1 - self._cb_[-1],                         # ... set to upper bound
-                                    self._Qinit_)                                  # ... otherwise keep
+        if self._continuous_outcome_list_[-1]:
+            self._Qinit_ = np.where(self._Qinit_ < 0.,                              # When lower than lower bound
+                                    0 + self._cb_list_[-1],                         # ... set to lower bound
+                                    self._Qinit_)                                   # ... otherwise keep
+            self._Qinit_ = np.where(self._Qinit_ > 1.,                              # When above the upper bound
+                                    1 - self._cb_list_[-1],                         # ... set to upper bound
+                                    self._Qinit_)                                   # ... otherwise keep
 
-        # if self._continuous_outcome:
-        #     self._Qinit_ = np.where(self._Qinit_ < self._continuous_min_,          # When lower than lower bound
-        #                             self._continuous_min_,                         # ... set to lower bound
-        #                             self._Qinit_)                                  # ... otherwise keep
-        #     self._Qinit_ = np.where(self._Qinit_ > self._continuous_max_,          # When above the upper bound
-        #                             self._continuous_max_,                         # ... set to upper bound
-        #                             self._Qinit_)                                  # ... otherwise keep
+        # if self._continuous_outcome_list_[-1]:
+        #     self._Qinit_ = np.where(self._Qinit_ < self._continuous_min_list_[-1],          # When lower than lower bound
+        #                             self._continuous_min_list_[-1],                         # ... set to lower bound
+        #                             self._Qinit_)                                           # ... otherwise keep
+        #     self._Qinit_ = np.where(self._Qinit_ > self._continuous_max_list_[-1],          # When above the upper bound
+        #                             self._continuous_max_list_[-1],                         # ... set to upper bound
+        #                             self._Qinit_)                                           # ... otherwise keep
 
     def fit(self, p, samples=100, bound=None, seed=None):
         """Estimation procedure under a specified treatment plan.
@@ -547,52 +547,43 @@ class NetworkTMLETimeSeries:
             Random seed for the Monte Carlo integration procedure
         """
         # Error checking for function order called correctly
-        if self._gi_model is None:                                               # A_i model must be specified
+        if self._gi_model is None:                                                      # A_i model must be specified
             raise ValueError("exposure_model() must be specified before fit()")
-        if self._gs_model is None:                                               # A_i^s model must be specified
+        if self._gs_model is None:                                                      # A_i^s model must be specified
             raise ValueError("exposure_map_model() must be specified before fit()")
-        if self._q_model is None:                                                # Y model must be specified
+        if self._q_model is None:                                                       # Y model must be specified
             raise ValueError("outcome_model() must be specified before fit()")
 
         # Error checking for policies
-        if type(p) is int:                                                       # Check if an integer is provided
+        if type(p) is int:                                                              # Check if an integer is provided
             raise ValueError("Input `p` must be float or container of floats")
 
-        if type(p) != float:                                                     # Check if not a float
-            if len(p) != self.df_list[-1].shape[0]:                                       # ... check length matches data shape
+        if type(p) != float:                                                            # Check if not a float
+            if len(p) != self.df_list[-1].shape[0]:                                     # ... check length matches data shape
                 raise ValueError("Vector of `p` must be same length as input data")
-            if np.all(np.asarray(p) == 0) or np.all(np.asarray(p) == 1):         # ... check if deterministic plan
+            if np.all(np.asarray(p) == 0) or np.all(np.asarray(p) == 1):                # ... check if deterministic plan
                 raise ValueError("Deterministic treatment plans not supported")
-            if np.any(np.asarray(p) < 0) or np.any(np.asarray(p) > 1):           # ... check if outside of prob bounds
+            if np.any(np.asarray(p) < 0) or np.any(np.asarray(p) > 1):                  # ... check if outside of prob bounds
                 raise ValueError("Probabilities for treatment must be between 0 and 1")
-        else:                                                                    # If it is a float
-            if p == 0 or p == 1:                                                 # ... check if deterministic plan
+        else:                                                                           # If it is a float
+            if p == 0 or p == 1:                                                        # ... check if deterministic plan
                 raise ValueError("Deterministic treatment plans not supported")
-            if p < 0 or p > 1:                                                   # ... check if outside of prob bounds
+            if p < 0 or p > 1:                                                          # ... check if outside of prob bounds
                 raise ValueError("Probabilities for treatment must be between 0 and 1")
 
-        h_iptw_list = []
-        pooled_data_restricted_list = []
-        for df, network, df_restricted in zip(self.df_list, self.network_list, self.df_restricted_list):
+        # Step 1) Estimate the weights
+        # Also generates pooled_data for use in the Monte Carlo integration procedure
+        self._resamples_ = samples                                                              # Saving info on number of resamples
+        h_iptw, pooled_data_restricted_list = self._estimate_iptw_ts_(p=p,                      # Generate pooled & estiamte weights
+                                                                     samples=samples,           # ... for some number of samples
+                                                                     bound=bound,               # ... with applied probability bounds
+                                                                     seed=seed)                 # ... and with a random seed given
 
-            # Step 1) Estimate the weights
-            # Also generates pooled_data for use in the Monte Carlo integration procedure
-            self._resamples_ = samples                                                # Saving info on number of resamples
-            h_iptw, pooled_data_restricted = self._estimate_iptw_per_slice_(df=df,
-                                                                            network=network,
-                                                                            df_restricted=df_restricted,
-                                                                            p=p,                # Generate pooled & estiamte weights
-                                                                            samples=samples,    # ... for some number of samples
-                                                                            bound=bound,        # ... with applied probability bounds
-                                                                            seed=seed)          # ... and with a random seed given
-            h_iptw_list.append(h_iptw)
-            pooled_data_restricted_list.append(pooled_data_restricted)
-
-            # Saving some information for diagnostic procedures
-            if self._gs_measure_ is None:                                  # If no summary measure, use the A_sum
-                self._for_diagnostics_ = pooled_data_restricted[[self.exposure, self.exposure+"_sum"]].copy()
-            else:                                                          # Otherwise, use the provided summary measure
-                self._for_diagnostics_ = pooled_data_restricted[[self.exposure, self._gs_measure_]].copy()
+        # Saving some information for diagnostic procedures
+        if self._gs_measure_ is None:                                  # If no summary measure, use the A_sum
+            self._for_diagnostics_ = pooled_data_restricted_list[-1][[self.exposure, self.exposure+"_sum"]].copy()
+        else:                                                          # Otherwise, use the provided summary measure
+            self._for_diagnostics_ = pooled_data_restricted_list[-1][[self.exposure, self._gs_measure_]].copy()
 
         # Step 2) Estimate from Q-model
         # process completed in .outcome_model() function and stored in self._Qinit_
@@ -600,15 +591,15 @@ class NetworkTMLETimeSeries:
 
         # Step 3) Target the parameter
         epsilon = targeting_step(y=self.df_restricted_list[-1][self.outcome],   # Estimate the targeting model given observed Y
-                                 q_init=self._Qinit_,                  # ... predicted values of Y under observed A
-                                 ipw=h_iptw_list[-1],                           # ... weighted by IPW
-                                 verbose=self._verbose_)               # ... with option for verbose info
+                                 q_init=self._Qinit_,                           # ... predicted values of Y under observed A
+                                 ipw=h_iptw,                                    # ... weighted by IPW
+                                 verbose=self._verbose_)                        # ... with option for verbose info
 
         # Step 4) Monte Carlo integration (old code did in loop but faster as vector)
         #
         # Generating outcome predictions under the policies (via pooled data sets)
-        if self._q_custom_ is None:                                            # If given a parametric default model
-            y_star = self._outcome_model.predict(pooled_data_restricted)       # ... predict using statsmodels syntax
+        if self._q_custom_ is None:                                                     # If given a parametric default model
+            y_star = self._outcome_model.predict(pooled_data_restricted_list[-1])       # ... predict using statsmodels syntax
         else:  # Custom input model by user
             if self.use_deep_learner_outcome:
                 xdata_list = []
@@ -621,72 +612,72 @@ class NetworkTMLETimeSeries:
 
                 y_star = outcome_deep_learner_ts(self._q_custom_, 
                                                  xdata_list, ydata_list, self.outcome, self.use_all_time_slices,
-                                                 self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome,
+                                                 self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
                                                  predict_with_best=True, custom_path=self._q_custom_path_)
             else:
-                d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted)  # ... extract data via patsy
-                y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,     # ... predict using custom function
-                                                xdata=np.asarray(d))              # ... for the extracted data
+                d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted_list[-1])  # ... extract data via patsy
+                y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,              # ... predict using custom function
+                                                xdata=np.asarray(d))                        # ... for the extracted data
         
-            pooled_data_restricted = pooled_data_restricted_list[-1] # set up pooled_data_restricted as the last time slice for further calculation
+            
         # Ensure all predicted values are bounded properly for continuous
         # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
-        if self._continuous_outcome:
-            y_star = np.where(y_star < 0., 0. + self._cb_, y_star)
-            y_star = np.where(y_star > 1., 1. - self._cb_, y_star)     
+        if self._continuous_outcome_list_[-1]:
+            y_star = np.where(y_star < 0., 0. + self._cb_list_[-1], y_star)
+            y_star = np.where(y_star > 1., 1. - self._cb_list_[-1], y_star)     
 
-        # if self._continuous_outcome:
-        #     y_star = np.where(y_star < self._continuous_min_, self._continuous_min_, y_star)
-        #     y_star = np.where(y_star > self._continuous_max_, self._continuous_max_, y_star)
+        # if self._continuous_outcome_list_[-1]:
+        #     y_star = np.where(y_star < self._continuous_min_list_[-1], self._continuous_min_list_[-1], y_star)
+        #     y_star = np.where(y_star > self._continuous_max_list_[-1], self._continuous_max_list_[-1], y_star)
 
         # Updating predictions via intercept from targeting step
-        logit_qstar = np.log(probability_to_odds(y_star)) + epsilon            # NOTE: needs to be logit(Y^*) + e
-        q_star = odds_to_probability(np.exp(logit_qstar))                      # Back converting from odds
-        pooled_data_restricted['__pred_q_star__'] = q_star                     # Storing predictions as column
+        logit_qstar = np.log(probability_to_odds(y_star)) + epsilon                         # NOTE: needs to be logit(Y^*) + e
+        q_star = odds_to_probability(np.exp(logit_qstar))                                   # Back converting from odds
+        pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star                         # Storing predictions as column
 
         # Taking the mean, grouped-by the pooled sample IDs (fast)
-        self.marginals_vector = np.asarray(pooled_data_restricted.groupby('_sample_id_')['__pred_q_star__'].mean())
+        self.marginals_vector = np.asarray(pooled_data_restricted_list[-1].groupby('_sample_id_')['__pred_q_star__'].mean())
 
         # If continuous outcome, need to unbound the means
-        if self._continuous_outcome:
-            self.marginals_vector = tmle_unit_unbound(self.marginals_vector,          # Take vector of MC results
-                                                      mini=self._continuous_min_,     # ... unbound using min
-                                                      maxi=self._continuous_max_)     # ... and max values
+        if self._continuous_outcome_list_[-1]:
+            self.marginals_vector = tmle_unit_unbound(self.marginals_vector,                    # Take vector of MC results
+                                                      mini=self._continuous_min_list_[-1],      # ... unbound using min
+                                                      maxi=self._continuous_max_list_[-1])      # ... and max values
 
         # Calculating estimate for the policy
-        self.marginal_outcome = np.mean(self.marginals_vector)                       # Mean of Monte Carlo results
-        self._specified_p_ = p                                                       # Save what the policy was
+        self.marginal_outcome = np.mean(self.marginals_vector)                                  # Mean of Monte Carlo results
+        self._specified_p_ = p                                                                  # Save what the policy was
 
         # Prep for variance
-        if self._continuous_outcome:                                                 # Continuous needs bounds...
-            y_ = np.array(tmle_unit_unbound(self.df_restricted_list[-1][self.outcome],        # Unbound observed outcomes for Var
-                                            mini=self._continuous_min_,              # ... using min
-                                            maxi=self._continuous_max_))             # ... and max values
-            yq0_ = tmle_unit_unbound(self._Qinit_,                                   # Unbound g-comp predictions
-                                     mini=self._continuous_min_,                     # ... using min
-                                     maxi=self._continuous_max_)                     # ... and max values
-        else:                                                                        # Otherwise nothing special...
-            y_ = np.array(self.df_restricted_list[-1][self.outcome])                          # Observed outcome for Var
-            yq0_ = self._Qinit_                                                      # Predicted outcome for Var
+        if self._continuous_outcome_list_[-1]:                                                  # Continuous needs bounds...
+            y_ = np.array(tmle_unit_unbound(self.df_restricted_list[-1][self.outcome],          # Unbound observed outcomes for Var
+                                            mini=self._continuous_min_list_[-1],                # ... using min
+                                            maxi=self._continuous_max_list_[-1]))               # ... and max values
+            yq0_ = tmle_unit_unbound(self._Qinit_,                                              # Unbound g-comp predictions
+                                     mini=self._continuous_min_list_[-1],                       # ... using min
+                                     maxi=self._continuous_max_list_[-1])                       # ... and max values
+        else:                                                                                   # Otherwise nothing special...
+            y_ = np.array(self.df_restricted_list[-1][self.outcome])                            # Observed outcome for Var
+            yq0_ = self._Qinit_                                                                 # Predicted outcome for Var
 
         # Step 5) Variance estimation
-        zalpha = norm.ppf(1 - self.alpha / 2, loc=0, scale=1)      # Get corresponding Z-value based on desired alpha
+        zalpha = norm.ppf(1 - self.alpha / 2, loc=0, scale=1)                                   # Get corresponding Z-value based on desired alpha
 
         # Variance: direct-only, conditional on W variance
-        var_cond = self._est_variance_conditional_(iptw=h_iptw_list[-1],                  # Estimate direct-only variance
-                                                   obs_y=y_,                              # ... observed value of Y
-                                                   pred_y=yq0_)                           # ... predicted value of Y
-        self.conditional_variance = var_cond                                              # Store the var estimate and CIs
+        var_cond = self._est_variance_conditional_(iptw=h_iptw,                                 # Estimate direct-only variance
+                                                   obs_y=y_,                                    # ... observed value of Y
+                                                   pred_y=yq0_)                                 # ... predicted value of Y
+        self.conditional_variance = var_cond                                                    # Store the var estimate and CIs
         self.conditional_ci = [self.marginal_outcome - zalpha*np.sqrt(var_cond),
                                self.marginal_outcome + zalpha*np.sqrt(var_cond)]
 
         # Variance: direct and latent, conditional on W variance
-        var_lcond = self._est_variance_latent_conditional_(iptw=h_iptw_list[-1],          # Estimate latent variance
-                                                           obs_y=y_,                      # ... observed value of Y
-                                                           pred_y=yq0_,                   # ... predicted value of Y
+        var_lcond = self._est_variance_latent_conditional_(iptw=h_iptw,                         # Estimate latent variance
+                                                           obs_y=y_,                            # ... observed value of Y
+                                                           pred_y=yq0_,                         # ... predicted value of Y
                                                            adj_matrix=self.adj_matrix_list[-1],
                                                            excluded_ids=self._exclude_ids_degree_)
-        self.conditional_latent_variance = var_lcond                             # Store variance estimate and CIs
+        self.conditional_latent_variance = var_lcond                                            # Store variance estimate and CIs
         self.conditional_latent_ci = [self.marginal_outcome - zalpha*np.sqrt(var_lcond),
                                       self.marginal_outcome + zalpha*np.sqrt(var_lcond)]
 
@@ -712,9 +703,9 @@ class NetworkTMLETimeSeries:
         print('            Network Targeted Maximum Likelihood Estimator             ')
         print('======================================================================')
         fmt = 'Treatment:        {:<15} No. Observations:     {:<20}'
-        print(fmt.format(self.exposure, self.df_restricted.shape[0]))
+        print(fmt.format(self.exposure, self.df_restricted_list[-1].shape[0]))
         fmt = 'Outcome:          {:<15} No. Background Nodes: {:<20}'
-        print(fmt.format(self.outcome, self.df.shape[0] - self.df_restricted.shape[0]))
+        print(fmt.format(self.outcome, self.df_list[-1].shape[0] - self.df_restricted_list[-1].shape[0]))
         fmt = 'Q-Model:          {:<15} No. IPW Truncated:    {:<20}'
         if self._specified_bound_ is None:
             b = 0
@@ -933,7 +924,7 @@ class NetworkTMLETimeSeries:
                            labels=[labels],             # ... with the specified labels
                            verbose=True)                # ... warns user if NaN's are being generated
 
-    def _estimate_iptw_per_slice_(self, df, network, df_restricted, p, samples, bound, seed):
+    def _estimate_iptw_ts_(self, p, samples, bound, seed):
         """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
         of Causal Inference 2017
 
@@ -953,6 +944,16 @@ class NetworkTMLETimeSeries:
         saves computation time since all the replicate data sets would be equivalent. The deterministic part will be
         resolved in an earlier procedure
 
+        SG_modified: time series version to generate pooled data and weights: 
+        ???
+        1. CANNOT support one exposure nuisance use deep learner and the other does not 
+        2. ONLY the following two situations are supported, implicitedly implemented in _estimate_exposure_nuisance_() 
+            1. Both nuisance exposure models use deep learner, then pooled data can be longitudinal, but the generated 
+               prediction is still the last time slice, same as non-ts version
+            2. Neither nuisance exposure models use deep learner, then pooled data have to be generated per slice, 
+               iptw is generated using the last time slice
+        
+
         Parameters
         ----------
         p : float, array
@@ -963,60 +964,129 @@ class NetworkTMLETimeSeries:
             Bounds to truncate calculate weights with
         seed : None, int
             Seed for pooled data set creation
+        
+        Retunrs
+        ----------
+        iptw: array
+            Weights for targeting
+        pooled_data_restricted_list: list
+            List of dataframes to pooled data, len() = T        
         """
+        # if self.use_deep_learner_A_i and self.use_deep_learner_A_i_s:
         # Estimate the denominator if not previously estimated
         if not self._denominator_estimated_:
-            self._denominator_ = self._estimate_exposure_nuisance_(data_to_fit=df_restricted.copy(),
-                                                                   data_to_predict=df_restricted.copy(),
-                                                                   distribution=self._map_dist_,
-                                                                   verbose_label='Weight - Denominator',
-                                                                   store_model=True,
-                                                                   custom_path_prefix='denom_',
-                                                                   print_every=5)
+            self._denominator_ = self._estimate_exposure_nuisance_ts_(data_to_fit_list=self.df_restricted_list.copy(),
+                                                                      data_to_predict_list=self.df_restricted_list.copy(),
+                                                                      distribution=self._map_dist_,
+                                                                      verbose_label='Weight - Denominator',
+                                                                      store_model=True,
+                                                                      custom_path_prefix='denom_',
+                                                                      print_every=5)
             self._denominator_estimated_ = True  # Updates flag for denominator
 
         # Creating pooled sample to estimate weights
-        pooled_df = self._generate_pooled_sample_per_slice(df=df,
-                                                           network=network,
-                                                           p=p,                                      # Generate data under policy
-                                                           samples=samples,                          # ... for m samples
-                                                           seed=seed)                                # ... with a provided seed
-        pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
+        pooled_data_restricted_list = []
+        for df, network, _max_degree_, df_restricted in zip(self.df_list, self.network_list, self._max_degree_list_, self.df_restricted_list):
+            pooled_df = self._generate_pooled_sample_per_slice(df=df,
+                                                               network=network,
+                                                               _max_degree_=_max_degree_,
+                                                               p=p,                                      # Generate data under policy
+                                                               samples=samples,                          # ... for m samples
+                                                               seed=seed)                                # ... with a provided seed
+            pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()             # Restricting pooled sample
 
-        # ensure pooled data contains all exposure levels in observed data
-        if self.use_deep_learner_A_i_s:
-            regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
-            print(f'before while loop regenerate_flag: {regenerate_flag}')
-            while regenerate_flag:
-                print(f'regenerating pooled sample for {self._gs_measure_}')
-                pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
-                                                        samples=samples,                           # ... for m samples
-                                                        seed=seed)                                 # ... with a provided seed
-                pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
-                regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
-                print(f'in while loop regenerate_flag: {regenerate_flag}')
-                print()
+            # ensure pooled data contains all exposure levels in observed data
+            if self.use_deep_learner_A_i_s:
+                regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, df_restricted)
+                print(f'before while loop regenerate_flag: {regenerate_flag}')
+                while regenerate_flag:
+                    print(f'regenerating pooled sample for {self._gs_measure_}')
+                    pooled_df = self._generate_pooled_sample_per_slice(df=df,
+                                                                       network=network,
+                                                                       _max_degree_=_max_degree_,
+                                                                       p=p,                                       # Generate data under policy
+                                                                       samples=samples,                           # ... for m samples
+                                                                       seed=seed)                                 # ... with a provided seed
+                    pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()              # Restricting pooled sample
+                    regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, df_restricted)
+                    print(f'in while loop regenerate_flag: {regenerate_flag}')
+                    print()
+            pooled_data_restricted_list.append(pooled_data_restricted)
 
         # Estimate the numerator using the pooled data
-        numerator = self._estimate_exposure_nuisance_(data_to_fit=pooled_data_restricted.copy(),
-                                                      data_to_predict=df_restricted.copy(),
-                                                      distribution=self._map_dist_,
-                                                      verbose_label='Weight - Numerator',
-                                                      store_model=False,
-                                                      custom_path_prefix='num_',
-                                                      # kwargs
-                                                      batch_size=512,
-                                                      print_every=15)
+        numerator = self._estimate_exposure_nuisance_ts_(data_to_fit_list=pooled_data_restricted_list.copy(),
+                                                         data_to_predict_list=self.df_restricted_list.copy(),
+                                                         distribution=self._map_dist_,
+                                                         verbose_label='Weight - Numerator',
+                                                         store_model=False,
+                                                         custom_path_prefix='num_',
+                                                         # kwargs
+                                                         batch_size=512,
+                                                         print_every=15)
 
         # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
         iptw = numerator / self._denominator_           # Divide numerator by denominator
         if bound is not None:                           # If weight bound provided
             iptw = bounding(ipw=iptw, bound=bound)      # ... apply the bound
 
-        # Return both the array of estimated weights and the generated pooled data set
-        return iptw, pooled_data_restricted
+        # elif self.use_deep_learner_A_i == False and self.use_deep_learner_A_i_s == False:
+        #     pooled_data_restricted_list = [] 
+        #     for i, (df, network, df_restricted) in enumerate(zip(self.df_list, self.network_list, self.df_restricted_list)):
+        #         # Estimate the denominator if not previously estimated
+        #         if not self._denominator_estimated_:
+        #             self._denominator_ = self._estimate_exposure_nuisance_(data_to_fit=df_restricted.copy(),
+        #                                                                 data_to_predict=df_restricted.copy(),
+        #                                                                 distribution=self._map_dist_,
+        #                                                                 verbose_label='Weight - Denominator',
+        #                                                                 store_model=True,
+        #                                                                 custom_path_prefix='denom_',
+        #                                                                 print_every=5)
+        #             self._denominator_estimated_ = True  # Updates flag for denominator
 
-    def _generate_pooled_sample_per_slice(self, df, network, p, samples, seed):
+        #         # Creating pooled sample to estimate weights
+        #         pooled_df = self._generate_pooled_sample_per_slice(df=df,
+        #                                                            network=network,
+        #                                                            p=p,                                      # Generate data under policy
+        #                                                            samples=samples,                          # ... for m samples
+        #                                                            seed=seed)                                # ... with a provided seed
+        #         pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()             # Restricting pooled sample
+
+        #         # ensure pooled data contains all exposure levels in observed data
+        #         if self.use_deep_learner_A_i_s:
+        #             regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
+        #             print(f'before while loop regenerate_flag: {regenerate_flag}')
+        #             while regenerate_flag:
+        #                 print(f'regenerating pooled sample for {self._gs_measure_}')
+        #                 pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
+        #                                                         samples=samples,                           # ... for m samples
+        #                                                         seed=seed)                                 # ... with a provided seed
+        #                 pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
+        #                 regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
+        #                 print(f'in while loop regenerate_flag: {regenerate_flag}')
+        #                 print()
+        #         pooled_data_restricted_list.append(pooled_data_restricted)
+
+        #         # Estimate the numerator using the pooled data
+        #         numerator = self._estimate_exposure_nuisance_(data_to_fit=pooled_data_restricted.copy(),
+        #                                                     data_to_predict=df_restricted.copy(),
+        #                                                     distribution=self._map_dist_,
+        #                                                     verbose_label='Weight - Numerator',
+        #                                                     store_model=False,
+        #                                                     custom_path_prefix='num_',
+        #                                                     # kwargs
+        #                                                     batch_size=512,
+        #                                                     print_every=15)
+
+        #         if i == len(self.df_list) - 1: # Reserve the iptw weights from the last time slice
+        #             # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
+        #             iptw = numerator / self._denominator_           # Divide numerator by denominator
+        #             if bound is not None:                           # If weight bound provided
+        #                 iptw = bounding(ipw=iptw, bound=bound)      # ... apply the bound
+
+        # Return both the array of estimated weights and the generated pooled data set
+        return iptw, pooled_data_restricted_list
+
+    def _generate_pooled_sample_per_slice(self, df, network, _max_degree_, p, samples, seed):
         """
 
         Note
@@ -1046,7 +1116,7 @@ class NetworkTMLETimeSeries:
         # this is also the best target for optimization since it takes about ~85% of current run times
 
         for s in range(samples):                                    # For each of the *m* samples
-            g = df.copy()                                      # Create a copy of the data
+            g = df.copy()                                           # Create a copy of the data
             probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
                                  p=p,                               # ... based on policy-assigned probabilities
                                  size=g.shape[0])                   # ... for the N units
@@ -1054,27 +1124,27 @@ class NetworkTMLETimeSeries:
                                         g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
 
             # Generating all summary measures based on the new exposure (could maybe avoid for all?)
-            g[self.exposure+'_sum'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='sum')
-            g[self.exposure + '_mean'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='mean')
+            g[self.exposure+'_sum'] = fast_exp_map(self.adj_matrix_list[-1], np.array(g[self.exposure]), measure='sum')
+            g[self.exposure + '_mean'] = fast_exp_map(self.adj_matrix_list[-1], np.array(g[self.exposure]), measure='mean')
             g[self.exposure + '_mean'] = g[self.exposure + '_mean'].fillna(0)            # isolates should have mean=0
-            g[self.exposure + '_var'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='var')
+            g[self.exposure + '_var'] = fast_exp_map(self.adj_matrix_list[-1], np.array(g[self.exposure]), measure='var')
             g[self.exposure + '_var'] = g[self.exposure + '_var'].fillna(0)              # isolates should have mean=0
-            g[self.exposure + '_mean_dist'] = fast_exp_map(self.adj_matrix,
+            g[self.exposure + '_mean_dist'] = fast_exp_map(self.adj_matrix_list[-1],
                                                            np.array(g[self.exposure]), measure='mean_dist')
             g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-            g[self.exposure + '_var_dist'] = fast_exp_map(self.adj_matrix,
+            g[self.exposure + '_var_dist'] = fast_exp_map(self.adj_matrix_list[-1],
                                                           np.array(g[self.exposure]), measure='var_dist')
             g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
 
             # Logic if no summary measure was specified (uses the complete factor approach)
             if self._gs_measure_ is None:
-                network = network.copy()                           # Copy the network
+                network = network.copy()                                # Copy the network
                 a = np.array(g[self.exposure])                          # Transform A_i into array
                 for n in network.nodes():                               # For each node,
                     network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
                 df = exp_map_individual(network,                        # Now do the individual exposure maps with new
                                         variable=self.exposure,
-                                        max_degree=self._max_degree_).fillna(0)
+                                        max_degree=_max_degree_).fillna(0)
                 for c in self._nonparam_cols_[-1]:                          # Adding back these np columns
                     g[c] = df[c]
 
@@ -1099,180 +1169,19 @@ class NetworkTMLETimeSeries:
         # Returning the pooled data set
         return pd.concat(pooled_sample, axis=0, ignore_index=True)
 
-    # def _estimate_iptw_(self, p, samples, bound, seed):
-    #     """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
-    #     of Causal Inference 2017
-
-    #     IPTW are estimated using the following process.
-
-    #     For the observed data, models are fit to estimate the Pr(A=a) for individual i (treating as IID data) and then
-    #     the Pr(A=a) for their contacts (treated as IID data). These probabilities are then multiplied together to
-    #     generate the denominator.
-
-    #     To calculate the numerator, the input data set is replicated `samples` times. To each of the data set copies,
-    #     the treatment plan is repeatedly applied. From this large set of observations under the stochastic treatment
-    #     plan of interest, models are again fit to the data, same as the prior procedure. The corresponding probabilities
-    #     are then multiplied together to generate the numerator.
-
-    #     Note: not implemented but the `deterministic` argument will use the following procedure. When a deterministic
-    #     treatment plan (like all-treat)vis input, only a single data set under the treatment plan is generated. This
-    #     saves computation time since all the replicate data sets would be equivalent. The deterministic part will be
-    #     resolved in an earlier procedure
-
-    #     Parameters
-    #     ----------
-    #     p : float, array
-    #         Probability of A_i as assigned by the policy
-    #     samples : int
-    #         Number of sampled data sets to generate
-    #     bound : None, int, float
-    #         Bounds to truncate calculate weights with
-    #     seed : None, int
-    #         Seed for pooled data set creation
-    #     """
-    #     # Estimate the denominator if not previously estimated
-    #     if not self._denominator_estimated_:
-    #         self._denominator_ = self._estimate_exposure_nuisance_(data_to_fit=self.df_restricted.copy(),
-    #                                                                data_to_predict=self.df_restricted.copy(),
-    #                                                                distribution=self._map_dist_,
-    #                                                                verbose_label='Weight - Denominator',
-    #                                                                store_model=True,
-    #                                                                custom_path_prefix='denom_',
-    #                                                                print_every=5)
-    #         self._denominator_estimated_ = True  # Updates flag for denominator
-
-    #     # Creating pooled sample to estimate weights
-    #     pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
-    #                                              samples=samples,                          # ... for m samples
-    #                                              seed=seed)                                # ... with a provided seed
-    #     pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
-
-    #     # ensure pooled data contains all exposure levels in observed data
-    #     if self.use_deep_learner_A_i_s:
-    #         regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
-    #         print(f'before while loop regenerate_flag: {regenerate_flag}')
-    #         while regenerate_flag:
-    #             print(f'regenerating pooled sample for {self._gs_measure_}')
-    #             pooled_df = self._generate_pooled_sample(p=p,                                      # Generate data under policy
-    #                                                     samples=samples,                           # ... for m samples
-    #                                                     seed=seed)                                 # ... with a provided seed
-    #             pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()   # Restricting pooled sample
-    #             regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted)
-    #             print(f'in while loop regenerate_flag: {regenerate_flag}')
-    #             print()
-
-    #     # Estimate the numerator using the pooled data
-    #     numerator = self._estimate_exposure_nuisance_(data_to_fit=pooled_data_restricted.copy(),
-    #                                                   data_to_predict=self.df_restricted.copy(),
-    #                                                   distribution=self._map_dist_,
-    #                                                   verbose_label='Weight - Numerator',
-    #                                                   store_model=False,
-    #                                                   custom_path_prefix='num_',
-    #                                                   # kwargs
-    #                                                   batch_size=512,
-    #                                                   print_every=15)
-
-    #     # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
-    #     iptw = numerator / self._denominator_           # Divide numerator by denominator
-    #     if bound is not None:                           # If weight bound provided
-    #         iptw = bounding(ipw=iptw, bound=bound)      # ... apply the bound
-
-    #     # Return both the array of estimated weights and the generated pooled data set
-    #     return iptw, pooled_data_restricted
-
-    # def _generate_pooled_sample(self, p, samples, seed):
-    #     """
-
-    #     Note
-    #     ----
-    #     Vectorization doesn't work, since the matrix manipulations get extremely large (even when using
-    #     scipy.sparse.block_diag()). So here the loop is more efficient due to how the summary measures are being
-    #     calculated via matrix multiplication.
-
-    #     Parameters
-    #     ----------
-    #     p : float, array
-    #         Probability of A_i as assigned by the policy
-    #     samples : int
-    #         Number of sampled data sets to generate
-    #     seed : None, int
-    #         Seed for pooled data set creation
-
-    #     Returns
-    #     -------
-    #     dataframe
-    #         Pooled data set under applications of the policy omega
-    #     """
-    #     # Prep for pooled data set creation
-    #     rng = np.random.default_rng(seed)  # Setting the seed for bootstraps
-    #     pooled_sample = []
-    #     # TODO one way to potentially speed up code is to run this using Pool. Easy for parallel
-    #     # this is also the best target for optimization since it takes about ~85% of current run times
-
-    #     for s in range(samples):                                    # For each of the *m* samples
-    #         g = self.df.copy()                                      # Create a copy of the data
-    #         probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
-    #                              p=p,                               # ... based on policy-assigned probabilities
-    #                              size=g.shape[0])                   # ... for the N units
-    #         g[self.exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degree
-    #                                     g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
-
-    #         # Generating all summary measures based on the new exposure (could maybe avoid for all?)
-    #         g[self.exposure+'_sum'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='sum')
-    #         g[self.exposure + '_mean'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='mean')
-    #         g[self.exposure + '_mean'] = g[self.exposure + '_mean'].fillna(0)            # isolates should have mean=0
-    #         g[self.exposure + '_var'] = fast_exp_map(self.adj_matrix, np.array(g[self.exposure]), measure='var')
-    #         g[self.exposure + '_var'] = g[self.exposure + '_var'].fillna(0)              # isolates should have mean=0
-    #         g[self.exposure + '_mean_dist'] = fast_exp_map(self.adj_matrix,
-    #                                                        np.array(g[self.exposure]), measure='mean_dist')
-    #         g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-    #         g[self.exposure + '_var_dist'] = fast_exp_map(self.adj_matrix,
-    #                                                       np.array(g[self.exposure]), measure='var_dist')
-    #         g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-
-    #         # Logic if no summary measure was specified (uses the complete factor approach)
-    #         if self._gs_measure_ is None:
-    #             network = self.network.copy()                           # Copy the network
-    #             a = np.array(g[self.exposure])                          # Transform A_i into array
-    #             for n in network.nodes():                               # For each node,
-    #                 network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
-    #             df = exp_map_individual(network,                        # Now do the individual exposure maps with new
-    #                                     variable=self.exposure,
-    #                                     max_degree=self._max_degree_).fillna(0)
-    #             for c in self._nonparam_cols_:                          # Adding back these np columns
-    #                 g[c] = df[c]
-
-    #         # Re-creating any threshold variables in the pooled sample data
-    #         if self._thresholds_any_:
-    #             create_threshold(data=g,
-    #                              variables=self._thresholds_variables_,
-    #                              thresholds=self._thresholds_,
-    #                              definitions=self._thresholds_def_)
-
-    #         # Re-creating any categorical variables in the pooled sample data
-    #         if self._categorical_any_:
-    #             create_categorical(data=g,
-    #                                variables=self._categorical_variables_,
-    #                                bins=self._categorical_,
-    #                                labels=self._categorical_def_,
-    #                                verbose=False)
-
-    #         g['_sample_id_'] = s         # Setting sample ID
-    #         pooled_sample.append(g)      # Adding to list (for later concatenate)
-
-    #     # Returning the pooled data set
-    #     return pd.concat(pooled_sample, axis=0, ignore_index=True)
-
-    def _estimate_exposure_nuisance_(self, data_to_fit, data_to_predict, distribution, verbose_label, store_model, 
-                                     custom_path_prefix=None, **kwargs):
+    def _estimate_exposure_nuisance_ts_(self, data_to_fit_list, data_to_predict_list, 
+                                        distribution, verbose_label, store_model, 
+                                        custom_path_prefix=None, **kwargs):
         """Unified function to estimate the numerator and denominator of the weights.
 
         Parameters
         ----------
-        data_to_fit : dataframe
+        data_to_fit_list : list of dataframe
+            Contains dataframe of all time slices, len() = T;
             Data to estimate the parameters of the nuisance model with. For the numerator, this is the pooled data set
             and for the denominator this is the observed data set. Both are restricted by degree, when applicable.
-        data_to_predict : dataframe
+        data_to_predict_list : list of dataframe
+            Contains dataframe of all time slices, len() = T;
             Data to generate predictions for from the fitted nuisance models. Will always be the observed data set,
             restricted by degree when applicable.
         distribution : None, str
@@ -1296,66 +1205,72 @@ class NetworkTMLETimeSeries:
         """
         ##################################
         # Model: A_i
-        if self._gi_custom_ is None:                                          # If no A_i custom_model is provided
-            f = sm.families.family.Binomial()                                 # ... use a logit model
-            treat_i_model = smf.glm(self.exposure + ' ~ ' + self._gi_model,   # Specified model from exposure_...()
-                                    data_to_fit,                              # ... using the restricted data
-                                    family=f).fit()                           # ... for logit family
+        if self._gi_custom_ is None:                                                    # If no A_i custom_model is provided
+            f = sm.families.family.Binomial()                                           # ... use a logit model
+            treat_i_model = smf.glm(self.exposure + ' ~ ' + self._gi_model,             # Specified model from exposure_...()
+                                    data_to_fit_list[-1],                               # ... using the restricted data
+                                    family=f).fit()                                     # ... for logit family
             # Verbose model results if requested
             if self._verbose_:
                 print('==============================================================================')
                 print(verbose_label+': A')
                 print(treat_i_model.summary())
 
-            pred = treat_i_model.predict(data_to_predict)                     # Save predicted probability
-            if store_model:                                                   # If denominator,
-                self._treatment_models.append(treat_i_model)                  # save model to list (so can be extracted)
+            pred = treat_i_model.predict(data_to_predict_list[-1])                     # Save predicted probability
+            if store_model:                                                            # If denominator,
+                self._treatment_models.append(treat_i_model)                           # save model to list (so can be extracted)
 
-        else:                                                                 # Otherwise use the custom_model
+        else:                                                                          # Otherwise use the custom_model
             if self.use_deep_learner_A_i:
-                xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
-                ydata = data_to_fit[self.exposure] 
-                n_output = pd.unique(ydata).shape[0]
-                print(f'gi_model: n_output = {n_output} for target variable {self.exposure}')
-
-                pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
-                pdata_y = data_to_predict[self.exposure]
-                custom_path = custom_path_prefix + 'A_i_' + self.exposure  + '.pth'
-                pred = exposure_deep_learner(self._gi_custom_, 
-                                             xdata, ydata, pdata, pdata_y, self.exposure,
-                                             self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
-                                             custom_path, **kwargs)
+                xdata_list = []
+                ydata_list = []
+                pdata_list = []
+                pdata_y_list = []
+                n_output_list =[]
+                for i, (d2f, d2p) in enumerate(zip(data_to_fit_list, data_to_predict_list)):
+                    xdata_list.append(patsy.dmatrix(self._gi_model + ' - 1', d2f, return_type="dataframe"))
+                    ydata_list.append(d2f[self.exposure])
+                    n_output_list.append(pd.unique(d2f[self.exposure]).shape[0])
+                    print(f'T_slice: {i} | gi_model | n_output: {n_output_list[i]} | target variable: {self.exposure}')
+                    pdata_list.append(patsy.dmatrix(self._gi_model + ' - 1', d2p, return_type="dataframe"))
+                    pdata_y_list.append(d2p[self.exposure])
+                
+                custom_path = custom_path_prefix + 'A_i_' + self.exposure  + '.pth' 
+                pred = exposure_deep_learner_ts(self._gi_custom_,
+                                                xdata_list, ydata_list, pdata_list, pdata_y_list, self.exposure, self.use_all_time_slices,
+                                                self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
+                                                custom_path, **kwargs)
             else:
-                xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit)       # Extract via patsy the data
-                pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict)   # Extract via patsy the data
-                pred = exposure_machine_learner(ml_model=self._gi_custom_,        # Custom model application and preds
-                                                xdata=np.asarray(xdata),          # ... with data to fit
-                                                ydata=np.asarray(data_to_fit[self.exposure]),
-                                                pdata=np.asarray(pdata))          # ... and data to predict
+                xdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_fit_list[-1])       # Extract via patsy the data
+                pdata = patsy.dmatrix(self._gi_model + ' - 1', data_to_predict_list[-1])   # Extract via patsy the data
+                pred = exposure_machine_learner(ml_model=self._gi_custom_,                 # Custom model application and preds
+                                                xdata=np.asarray(xdata),                   # ... with data to fit
+                                                ydata=np.asarray(data_to_fit_list[-1][self.exposure]),
+                                                pdata=np.asarray(pdata))                   # ... and data to predict
 
         # Assigning probability given observed
-        pr_i = np.where(data_to_predict[self.exposure] == 1,                  # If A_i = 1
-                        pred,                                                 # ... get Pr(A_i=1 | ...)
-                        1 - pred)                                             # ... otherwise get Pr(A_i=0 | ...)
+        pr_i = np.where(data_to_predict_list[-1][self.exposure] == 1,                      # If A_i = 1
+                        pred,                                                              # ... get Pr(A_i=1 | ...)
+                        1 - pred)                                                          # ... otherwise get Pr(A_i=0 | ...)
 
         ##################################
         # Model: A_i^s
-        if distribution is None:                                              # When no distribution is provided
-            if self._gs_custom_ is None:                                      # and no custom_model is given
-                f = sm.families.family.Binomial()                             # ... use a logit model
-                cond_vars = patsy.dmatrix(self._gs_model,                     # Extract initial set of covs
-                                          data_to_fit,                        # ... from the data to fit
-                                          return_type='matrix')               # ... as a NumPy matrix
-                pred_vars = patsy.dmatrix(self._gs_model,                     # Extract initial set of covs
-                                          data_to_predict,                    # ... from the data to predict
-                                          return_type='matrix')               # ... as a NumPy matrix
-                pr_s = np.array([1.] * data_to_predict.shape[0])              # Setup vector of 1's as the probability
+        if distribution is None:                                                           # When no distribution is provided
+            if self._gs_custom_ is None:                                                   # and no custom_model is given
+                f = sm.families.family.Binomial()                                          # ... use a logit model
+                cond_vars = patsy.dmatrix(self._gs_model,                                  # Extract initial set of covs
+                                          data_to_fit_list[-1],                            # ... from the data to fit
+                                          return_type='matrix')                            # ... as a NumPy matrix
+                pred_vars = patsy.dmatrix(self._gs_model,                                  # Extract initial set of covs
+                                          data_to_predict_list[-1],                        # ... from the data to predict
+                                          return_type='matrix')                            # ... as a NumPy matrix
+                pr_s = np.array([1.] * data_to_predict_list[-1].shape[0])                  # Setup vector of 1's as the probability
 
-                for c in self._nonparam_cols_:                                # For each of the NP columns
-                    treat_s_model = sm.GLM(data_to_fit[c], cond_vars,         # Estimate using the pooled data
-                                           family=f).fit()                    # ... with logistic model
-                    if store_model:                                           # If estimating denominator
-                        self._treatment_models.append(treat_s_model)          # Save estimated model for checking
+                for c in self._nonparam_cols_:                                             # For each of the NP columns
+                    treat_s_model = sm.GLM(data_to_fit_list[-1][c], cond_vars,             # Estimate using the pooled data
+                                           family=f).fit()                                 # ... with logistic model
+                    if store_model:                                                        # If estimating denominator
+                        self._treatment_models.append(treat_s_model)                       # Save estimated model for checking
 
                     # If verbose requested, provide model output
                     if self._verbose_:
@@ -1364,27 +1279,27 @@ class NetworkTMLETimeSeries:
                         print(treat_s_model.summary())
 
                     # Generating predicted probabilities
-                    pred = treat_s_model.predict(pred_vars)                   # Generate the prediction for observed
-                    pr_s *= np.where(data_to_predict[c] == 1,                 # cumulative probability for each step
-                                     pred, 1 - pred)                          # ...logic for correct probability value
+                    pred = treat_s_model.predict(pred_vars)                                # Generate the prediction for observed
+                    pr_s *= np.where(data_to_predict_list[-1][c] == 1,                     # cumulative probability for each step
+                                     pred, 1 - pred)                                       # ...logic for correct probability value
 
                     # Stacking vector to the end of the array for next cycle
-                    cond_vars = np.c_[cond_vars, np.array(data_to_fit[c])]       # Update the covariates
-                    pred_vars = np.c_[pred_vars, np.array(data_to_predict[c])]   # Update the covariates
+                    cond_vars = np.c_[cond_vars, np.array(data_to_fit_list[-1][c])]        # Update the covariates
+                    pred_vars = np.c_[pred_vars, np.array(data_to_predict_list[-1][c])]    # Update the covariates
 
-            else:                                                     # Placeholder for conditional density SL
+            else:                                                                          # Placeholder for conditional density SL
                 # TODO fill in the super-learner conditional density approach here when possible...
                 raise ValueError("Not available currently...")
 
-        elif distribution == 'normal':                                # If a normal distribution
-            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model     # Setup the model form
-            treat_s_model = smf.ols(gs_model,                         # Estimate via OLS
-                                    data_to_fit).fit()                # ... with data to fit
-            self._treatment_models.append(treat_s_model)              # Store estimated model to check
-            pred = treat_s_model.predict(data_to_predict)             # Generate predicted values for data to predict
-            pr_s = norm.pdf(data_to_predict[self._gs_measure_],       # Get f(A_i^s | ...) for measure
-                            pred,                                     # ... given predicted value
-                            np.sqrt(treat_s_model.mse_resid))         # ... and sqrt of model residual
+        elif distribution == 'normal':                                                     # If a normal distribution
+            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model                          # Setup the model form
+            treat_s_model = smf.ols(gs_model,                                              # Estimate via OLS
+                                    data_to_fit_list[-1]).fit()                            # ... with data to fit
+            self._treatment_models.append(treat_s_model)                                   # Store estimated model to check
+            pred = treat_s_model.predict(data_to_predict_list[-1])                         # Generate predicted values for data to predict
+            pr_s = norm.pdf(data_to_predict_list[-1][self._gs_measure_],                   # Get f(A_i^s | ...) for measure
+                            pred,                                                          # ... given predicted value
+                            np.sqrt(treat_s_model.mse_resid))                              # ... and sqrt of model residual
 
             # If verbose requested, provide model output
             if self._verbose_:
@@ -1392,16 +1307,16 @@ class NetworkTMLETimeSeries:
                 print(verbose_label+': '+self._gs_measure_)
                 print(treat_s_model.summary())
 
-        elif distribution == 'poisson':                               # If a poisson distribution
-            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model     # Setup the model form
-            if self._gs_custom_ is None:                              # If no custom model provided
-                f = sm.families.family.Poisson()                      # ... GLM with Poisson family
-                treat_s_model = smf.glm(gs_model,                     # Estimate model
-                                        data_to_fit,                  # ... with data to fit
-                                        family=f).fit()               # ... and Poisson distribution
-                if store_model:                                       # If estimating denominator
-                    self._treatment_models.append(treat_s_model)      # ... store the model
-                pred = treat_s_model.predict(data_to_predict)         # Predicted values with data to predict
+        elif distribution == 'poisson':                                                    # If a poisson distribution
+            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model                          # Setup the model form
+            if self._gs_custom_ is None:                                                   # If no custom model provided
+                f = sm.families.family.Poisson()                                           # ... GLM with Poisson family
+                treat_s_model = smf.glm(gs_model,                                          # Estimate model
+                                        data_to_fit_list[-1],                              # ... with data to fit
+                                        family=f).fit()                                    # ... and Poisson distribution
+                if store_model:                                                            # If estimating denominator
+                    self._treatment_models.append(treat_s_model)                           # ... store the model
+                pred = treat_s_model.predict(data_to_predict_list[-1])                     # Predicted values with data to predict
 
                 # If verbose requested, provide model output
                 if self._verbose_:
@@ -1409,53 +1324,66 @@ class NetworkTMLETimeSeries:
                     print(verbose_label+': '+self._gs_measure_)
                     print(treat_s_model.summary())
 
-            else:                                                           # Custom model for Poisson
+            else:                                                                          # Custom model for Poisson
                 if self.use_deep_learner_A_i_s:
-                    data_to_fit_subset = select_pooled_sample_with_observed_data(self._gs_measure_, data_to_fit, data_to_predict)
-                    print(f'gs_model: use {data_to_fit_subset.shape[0]} samples from original {data_to_fit.shape[0]} to fit the model')
-                    xdata = patsy.dmatrix(self._gs_model + ' - 1', 
-                                          data_to_fit_subset, return_type="dataframe")       # Extract via patsy the data
-                    ydata = data_to_fit_subset[self._gs_measure_]
-                    n_output = pd.unique(ydata).shape[0] 
-                    print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
+                    xdata_list = []
+                    ydata_list = []
+                    pdata_list = []
+                    pdata_y_list = []
+                    n_output_list =[]
 
-                    pdata = patsy.dmatrix(self._gs_model + ' - 1', 
-                                          data_to_predict, return_type="dataframe")   # Extract via patsy the data
-                    pdata_y = data_to_predict[self._gs_measure_]
+                    data_to_fit_subset_list = []
+                    num_samples_used_min = float('inf')
+                    for i, (d2f, d2p) in enumerate(zip(data_to_fit_list, data_to_predict_list)): # number of samples used should be consistent throughout time, loop over pooled dataset to obtain the minimum number of samples at a given time slice
+                        data_to_fit_subset = select_pooled_sample_with_observed_data(self._gs_measure_, d2f, d2p)
+                        data_to_fit_subset_list.append(data_to_fit_subset)
+                        num_samples_used_min = data_to_fit_subset.shape[0] if data_to_fit_subset.shape[0] < num_samples_used_min else num_samples_used_min
+                        print(f'T_slice: {i} | gs_model | samples used: {data_to_fit_subset.shape[0]} | samples original: {d2f.shape[0]}')
+                        pdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', d2p, return_type="dataframe"))
+                        pdata_y_list.append(d2p[self._gs_measure_])
+
+                    for i, data_to_fit_subset in enumerate(data_to_fit_subset_list):
+                        data_to_fit_subset = data_to_fit_subset[:num_samples_used_min]                        
+                        xdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', data_to_fit_subset, return_type="dataframe"))
+                        ydata_list.append(data_to_fit_subset[self._gs_measure_])
+                        n_output_list.append(pd.unique(data_to_fit_subset[self._gs_measure_]).shape[0])
+                        print(f'T_slice: {i} | gs_model | n_output : {n_output_list[i]} | target variables: {self._gs_measure_}')
+                        
+
                     custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
-                    pred = exposure_deep_learner(self._gs_custom_, 
-                                                 xdata, ydata, pdata, pdata_y, self._gs_measure_,
-                                                 self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
-                                                 custom_path, **kwargs)
+                    pred = exposure_deep_learner_ts(self._gs_custom_,
+                                                    xdata_list, ydata_list, pdata_list, pdata_y_list, self._gs_measure_, self.use_all_time_slices,
+                                                    self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
+                                                    custom_path, **kwargs)
                 else:
-                    xdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
-                                        data_to_fit)                          # ... from degree restricted
-                    pdata = patsy.dmatrix(self._gs_model + ' - 1',              # ... extract data given relevant model
-                                        data_to_predict)                      # ... from degree restricted
-                    pred = exposure_machine_learner(ml_model=self._gs_custom_,  # Custom ML model
-                                                    xdata=np.asarray(xdata),    # ... with data to fit
-                                                    ydata=np.asarray(data_to_fit[self._gs_measure_]),
-                                                    pdata=np.asarray(pdata))    # ... and data to predict
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1',                          # ... extract data given relevant model
+                                          data_to_fit_list[-1])                             # ... from degree restricted
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1',                          # ... extract data given relevant model
+                                          data_to_predict_list[-1])                         # ... from degree restricted
+                    pred = exposure_machine_learner(ml_model=self._gs_custom_,              # Custom ML model
+                                                    xdata=np.asarray(xdata),                # ... with data to fit
+                                                    ydata=np.asarray(data_to_fit_list[-1][self._gs_measure_]),
+                                                    pdata=np.asarray(pdata))                # ... and data to predict
             
             if self.use_deep_learner_A_i_s: # deep learner output probability already, no need to transform
                 pr_s = pred
             else:
-                pr_s = poisson.pmf(data_to_predict[self._gs_measure_], pred)    # Get f(A_i^s | ...) for measure
+                pr_s = poisson.pmf(data_to_predict_list[-1][self._gs_measure_], pred)       # Get f(A_i^s | ...) for measure
 
-        elif distribution == 'multinomial':                              # If multinomial distribution
-            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model        # Setup the model form
-            treat_s_model = smf.mnlogit(gs_model,                        # Estimate multinomial model
-                                        data_to_fit).fit(disp=False)     # ... with data to fit
-            if store_model:                                              # If estimating denominator
-                self._treatment_models.append(treat_s_model)             # ... add fitted model to list of models
+        elif distribution == 'multinomial':                                                 # If multinomial distribution
+            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model                           # Setup the model form
+            treat_s_model = smf.mnlogit(gs_model,                                           # Estimate multinomial model
+                                        data_to_fit_list[-1]).fit(disp=False)               # ... with data to fit
+            if store_model:                                                                 # If estimating denominator
+                self._treatment_models.append(treat_s_model)                                # ... add fitted model to list of models
 
-            pred = treat_s_model.predict(data_to_predict)                # predict probabilities for each category
-            values = pd.get_dummies(data_to_predict[self._gs_measure_])  # transform to dummy variables for processing
-            pr_s = np.array([0.0] * data_to_predict.shape[0])            # generate blank array of probabilities
-            for i in data_to_predict[self._gs_measure_].unique():        # for each unique value in the multinomial
-                try:                                                     # ... try-except skips if unique not occur
-                    pr_s += pred[i] * values[i]                          # ... update probability
-                except KeyError:                                         # ... logic to skip the KeyError's
+            pred = treat_s_model.predict(data_to_predict_list[-1])                          # predict probabilities for each category
+            values = pd.get_dummies(data_to_predict_list[-1][self._gs_measure_])            # transform to dummy variables for processing
+            pr_s = np.array([0.0] * data_to_predict_list[-1].shape[0])                      # generate blank array of probabilities
+            for i in data_to_predict_list[-1][self._gs_measure_].unique():                  # for each unique value in the multinomial
+                try:                                                                        # ... try-except skips if unique not occur
+                    pr_s += pred[i] * values[i]                                             # ... update probability
+                except KeyError:                                                            # ... logic to skip the KeyError's
                     pass
 
             # If verbose requested, provide model output
@@ -1464,15 +1392,15 @@ class NetworkTMLETimeSeries:
                 print(verbose_label+': '+self._gs_measure_)
                 print(treat_s_model.summary())
 
-        elif distribution == 'binomial':                                 # If binomial distribution
-            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model        # setup the model form
-            f = sm.families.family.Binomial()                            # specify the logistic family option
-            treat_s_model = smf.glm(gs_model,                            # Estimate the model
-                                    data_to_fit,                         # ... with data to fit
-                                    family=f).fit()                      # ... and logistic model
-            if store_model:                                              # If estimating denominator
-                self._treatment_models.append(treat_s_model)             # ... add fitted model to list of models
-            pr_s = treat_s_model.predict(data_to_predict)                # generate predicted probabilities of As=1
+        elif distribution == 'binomial':                                                    # If binomial distribution
+            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model                           # setup the model form
+            f = sm.families.family.Binomial()                                               # specify the logistic family option
+            treat_s_model = smf.glm(gs_model,                                               # Estimate the model
+                                    data_to_fit_list[-1],                                   # ... with data to fit
+                                    family=f).fit()                                         # ... and logistic model
+            if store_model:                                                                 # If estimating denominator
+                self._treatment_models.append(treat_s_model)                                # ... add fitted model to list of models
+            pr_s = treat_s_model.predict(data_to_predict_list[-1])                          # generate predicted probabilities of As=1
 
             # If verbose requested, provide model output
             if self._verbose_:
@@ -1480,48 +1408,54 @@ class NetworkTMLETimeSeries:
                 print(verbose_label+': '+self._gs_measure_)
                 print(treat_s_model.summary())
 
-        elif distribution == 'threshold':                                # If distribution is a threshold
-            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model        # setup the model form
-            if self._gs_custom_ is None:                                 # if no custom model is given
-                f = sm.families.family.Binomial()                        # ... logistic model
-                treat_s_model = smf.glm(gs_model,                        # Estimate the model
-                                        data_to_fit,                     # ... with data to fit
-                                        family=f).fit()                  # ... and logistic model
-                if store_model:                                          # If estimating the denominator
-                    self._treatment_models.append(treat_s_model)         # ... add fitted model to list of models
-                pred = treat_s_model.predict(data_to_predict)            # Generate predicted values of As=threshold
+        elif distribution == 'threshold':                                                   # If distribution is a threshold
+            gs_model = self._gs_measure_ + ' ~ ' + self._gs_model                           # setup the model form
+            if self._gs_custom_ is None:                                                    # if no custom model is given
+                f = sm.families.family.Binomial()                                           # ... logistic model
+                treat_s_model = smf.glm(gs_model,                                           # Estimate the model
+                                        data_to_fit_list[-1],                               # ... with data to fit
+                                        family=f).fit()                                     # ... and logistic model
+                if store_model:                                                             # If estimating the denominator
+                    self._treatment_models.append(treat_s_model)                            # ... add fitted model to list of models
+                pred = treat_s_model.predict(data_to_predict_list[-1])                      # Generate predicted values of As=threshold
 
                 # If verbose requested, provide model output
                 if self._verbose_:
                     print('==============================================================================')
                     print('g-model: '+self._gs_measure_)
                     print(treat_s_model.summary())
-            else:                                                                 # Else custom model for threshold
+            else:                                                                           # Else custom model for threshold
                 if self.use_deep_learner_A_i_s:
-                    data_to_fit_subset = select_pooled_sample_with_observed_data(self._gs_measure_, data_to_fit, data_to_predict)
-                    print(f'gs_model: use {data_to_fit_subset.shape[0]} samples from original {data_to_fit.shape[0]} to fit the model')
-                    xdata = patsy.dmatrix(self._gs_model + ' - 1', 
-                                          data_to_fit_subset, return_type="dataframe")       # Extract via patsy the data
-                    ydata = data_to_fit_subset[self._gs_measure_]
-                    n_output = pd.unique(ydata).shape[0] 
-                    print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
+                    xdata_list = []
+                    ydata_list = []
+                    pdata_list = []
+                    pdata_y_list = []
+                    n_output_list =[]
 
-                    pdata = patsy.dmatrix(self._gs_model + ' - 1', 
-                                          data_to_predict, return_type="dataframe")   # Extract via patsy the data
-                    pdata_y = data_to_predict[self._gs_measure_]
+                    for i, (d2f, d2p) in enumerate(zip(data_to_fit_list, data_to_predict_list)):
+                        data_to_fit_subset = select_pooled_sample_with_observed_data(self._gs_measure_, d2f, d2p)
+                        print(f'T_slice: {i} | gs_model | samples used: {data_to_fit_subset.shape[0]} | samples original: {d2f.shape[0]}')
+                        xdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', data_to_fit_subset, return_type="dataframe"))
+                        ydata_list.append(data_to_fit_subset[self._gs_measure_])
+                        n_output_list.append(pd.unique(data_to_fit_subset[self._gs_measure_]).shape[0])
+                        print(f'T_slice: {i} | gs_model | n_output : {n_output_list[i]} | target variables: {self._gs_measure_}')
+                        pdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', d2p, return_type="dataframe"))
+                        pdata_y_list.append(d2p[self._gs_measure_])
+
                     custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
-                    pred = exposure_deep_learner(self._gs_custom_, 
-                                                 xdata, ydata, pdata, pdata_y, self._gs_measure_,
-                                                 self.adj_matrix, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output,
-                                                 custom_path, **kwargs)
+                    pred = exposure_deep_learner_ts(self._gs_custom_,
+                                                    xdata_list, ydata_list, pdata_list, pdata_y_list, self._gs_measure_, self.use_all_time_slices,
+                                                    self.adj_matrix_list[-1], self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
+                                                    custom_path, **kwargs)
                 else:
-                    xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit)       # Processing data to be fit
-                    pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict)   # Processing data to be fit
-                    pred = exposure_machine_learner(ml_model=self._gs_custom_,        # Estimating the ML
-                                                    xdata=np.asarray(xdata),          # ... with data to fit
-                                                    ydata=np.asarray(data_to_fit[self._gs_measure_]),
-                                                    pdata=np.asarray(xdata))          # ... and data to predict
-            pr_s = np.where(data_to_predict[self._gs_measure_] == 1,              # Getting predicted values
+                    xdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_fit_list[-1])       # Processing data to be fit
+                    pdata = patsy.dmatrix(self._gs_model + ' - 1', data_to_predict_list[-1])   # Processing data to be fit
+                    pred = exposure_machine_learner(ml_model=self._gs_custom_,                 # Estimating the ML
+                                                    xdata=np.asarray(xdata),                   # ... with data to fit
+                                                    ydata=np.asarray(data_to_fit_list[-1][self._gs_measure_]),
+                                                    pdata=np.asarray(xdata))                   # ... and data to predict
+                    
+            pr_s = np.where(data_to_predict_list[-1][self._gs_measure_] == 1,                  # Getting predicted values
                             pred,
                             1 - pred)
 
