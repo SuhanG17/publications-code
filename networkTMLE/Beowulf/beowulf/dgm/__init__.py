@@ -13,4 +13,4 @@ from .sofrygin import (sofrygin_observational, sofrygin_randomized, modified_obs
 from .statin_with_cat_cont_split import statin_dgm, statin_dgm_truth
 from .naloxone_with_cat_cont_split import naloxone_dgm, naloxone_dgm_truth
 from .diet_with_cat_cont_split import diet_dgm, diet_dgm_truth
-from .vaccine_with_cat_cont_split import vaccine_dgm, vaccine_dgm_truth
+from .vaccine_with_cat_cont_split import vaccine_dgm, vaccine_dgm_truth, vaccine_dgm_time_series

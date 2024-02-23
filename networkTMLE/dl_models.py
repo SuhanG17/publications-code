@@ -314,6 +314,8 @@ class GCNModelTimeSeries(nn.Module):
         self.adj_matrix = adj_matrix
 
         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
+        self.n_cont = n_cont
+
         self.lin1 = nn.Linear(self.n_emb + n_cont, 16)
         self.gcn = GCNLayerTimeSeries(16, 32)
         if n_output == 2 or _continuous_outcome:

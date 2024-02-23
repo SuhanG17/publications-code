@@ -1,3 +1,15 @@
+'''
+CAVEAT
+
+None of the independent variables involved in the forecasting task has changed over time.
+Only variables that are time-varying are D, I and R.  
+But, D is the dependent variable, and I, R should only be known from simulation not real epidemic.
+Time Series Version should not be used, because the input is the same along the time-axis.
+
+TODO: add a time-varing variable to the network.
+'''
+
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -573,7 +585,8 @@ if __name__ == '__main__':
     # from amonhen import NetworkTMLE   # internal version, recommended to use library above instead
     from beowulf import load_random_vaccine
     # from beowulf.dgm import statin_dgm, naloxone_dgm, diet_dgm, vaccine_dgm
-    from Beowulf.beowulf.dgm.vaccine_with_cat_cont_split import vaccine_dgm_time_series
+    # from Beowulf.beowulf.dgm.vaccine_with_cat_cont_split import vaccine_dgm_time_series
+    from beowulf.dgm import vaccine_dgm_time_series
    
     # random network with reproducibility
     torch.manual_seed(17) 
@@ -615,14 +628,29 @@ if __name__ == '__main__':
     # device = 'cpu'
     print(device)
 
-    deep_learner_a_i = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    # # MLP model
+    # deep_learner_a_i = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                          epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # deep_learner_a_i_s = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                              epochs=10, print_every=5, device=device, save_path='./tmp.pth')    
+    # deep_learner_outcome = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                              epochs=10, print_every=5, device=device, save_path='./tmp.pth')                                    
+
+    # GCN model
+    # deep_learner_a_i = GCNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                          epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # deep_learner_a_i_s = GCNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                            epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    # deep_learner_outcome = GCNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+    #                              epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    
+    # # CNN model
+    deep_learner_a_i = CNNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
                              epochs=10, print_every=5, device=device, save_path='./tmp.pth')
-    deep_learner_a_i_s = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-                                 epochs=10, print_every=5, device=device, save_path='./tmp.pth')    
-    deep_learner_outcome = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-                                 epochs=10, print_every=5, device=device, save_path='./tmp.pth')                                    
-    # deep_learner = GCN(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-    #                   epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    deep_learner_a_i_s = CNNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                               epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+    deep_learner_outcome = CNNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
+                                 epochs=10, print_every=5, device=device, save_path='./tmp.pth')
     
     # tmle.exposure_model("A + H + H_mean + degree")
     tmle.exposure_model("A + H + H_mean + degree", custom_model=deep_learner_a_i) # use_deep_learner_A_i=True
@@ -635,445 +663,3 @@ if __name__ == '__main__':
     tmle.fit(p=0.55, bound=0.01)
     tmle.summary()
     
-    # # ############################# scratch #################################
-    # tmle.df_restricted_list[-1].columns
-    # pd.unique(tmle.df_restricted_list[-1]['D'])
-    # tmle.cat_vars
-    # cat_vars
-    # cont_vars
-
-    # h_iptw, pooled_data_restricted_list = tmle._estimate_iptw_ts_(p=0.55,                      # Generate pooled & estiamte weights
-    #                                                               samples=100,           # ... for some number of samples
-    #                                                               bound=None,               # ... with applied probability bounds
-    #                                                               seed=None)
-
-    # len(pooled_data_restricted_list)
-
-    # tmle.df_restricted['diet_t3']
-    # tmle.df_restricted['diet_t3'].value_counts()
-    # tmle.df_restricted['bmi']
-
-    # cat_vars
-    # cont_vars
-    # cat_unique_levels
-
-    
-    # import patsy
-    # # exposure A_i
-    # # data_to_fit = tmle.df_restricted.copy()
-    # # data_to_predict = tmle.df_restricted.copy()
-
-    # # xdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_fit, return_type="dataframe")       # Extract via patsy the data
-    # # ydata = data_to_fit[tmle.exposure] 
-    # # n_output = pd.unique(ydata).shape[0]
-    # # print(f'gi_model: n_output = {n_output} for target variable {tmle.exposure}')
-
-    # # pdata = patsy.dmatrix(tmle._gi_model + ' - 1', data_to_predict, return_type="dataframe")   # Extract via patsy the data
-    # # pdata_y = data_to_predict[tmle.exposure]
-    # # custom_path = 'denom_' + 'A_i_' + tmle.exposure  + '.pth'
-
-    # # outcome
-    # xdata = patsy.dmatrix("diet + diet_t3 + B + G + E + E_sum + B_mean_dist" + ' - 1', tmle.df_restricted, return_type="dataframe")
-    # ydata = tmle.df_restricted[tmle.outcome] 
-    # n_output = pd.unique(ydata).shape[0]
-
-    # from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df 
-    # # exposure A_i
-    # # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-    # #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
-    # # fit_df = append_target_to_df(ydata, xdata, tmle.exposure)
-
-    # # outcome
-    # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-    #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
-    # fit_df = append_target_to_df(ydata, xdata, tmle.outcome)
-
-    # fit_df
-    # model_cat_vars
-    # model_cont_vars
-    # model_cat_unique_levels
-    # fit_df['B_30'].value_counts()
-    # pd.unique(fit_df['B_30'])
-    # pd.unique(tmle.df_restricted['B'])
-
-    # tmle._continuous_outcome
-    # model = deep_learner._build_model(None, model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output, tmle._continuous_outcome)
-    # embedding_sizes = [(n_categories, min(50, (n_categories+1)//2)) for _, n_categories in model_cat_unique_levels.items()]
-    # embedding_sizes
-    # model_cat_unique_levels
-
-    # tmle.df_restricted['diet_t3']
-    # pd.unique(tmle.df_restricted['diet_t3'])
-
-    # cat_unique_levels
-
-    # pd.unique(tmle.df_restricted['diet_t3']).max() + 1 
-    
-    # # poisson model
-    # import statsmodels.api as sm
-    # import statsmodels.formula.api as smf
-    # from scipy.stats import poisson, norm
-
-    # data_to_fit = tmle.df_restricted.copy()
-    # data_to_predict = tmle.df_restricted.copy()
-   
-    # gs_model = tmle._gs_measure_ + ' ~ ' + tmle._gs_model     # Setup the model form
-    # # if self._gs_custom_ is None:                              # If no custom model provided
-    # f = sm.families.family.Poisson()                      # ... GLM with Poisson family
-    # treat_s_model = smf.glm(gs_model,                     # Estimate model
-    #                         data_to_fit,                  # ... with data to fit
-    #                         family=f).fit()               # ... and Poisson distribution
-    # # if store_model:                                       # If estimating denominator
-    # #     self._treatment_models.append(treat_s_model)      # ... store the model
-    # pred = treat_s_model.predict(data_to_predict)         # Predicted values with data to predict
-
-    # # # If verbose requested, provide model output
-    # # if self._verbose_:
-    # #     print('==============================================================================')
-    # #     print(verbose_label+': '+self._gs_measure_)
-    # #     print(treat_s_model.summary())
-
-    # pr_s = poisson.pmf(data_to_predict[tmle._gs_measure_], pred)
-
-
-    # import patsy
-    # data_to_fit = tmle.df_restricted.copy()
-    # xdata = patsy.dmatrix(tmle._gs_model + ' - 1', 
-    #                       data_to_fit, return_type="dataframe")       # Extract via patsy the data
-    # ydata = data_to_fit[tmle._gs_measure_]
-    # n_output = pd.unique(ydata).shape[0] 
-    # # print(f'gs_model: n_output = {n_output} for target variable {self._gs_measure_}')
-
-    # # pdata = patsy.dmatrix(self._gs_model + ' - 1', 
-    # #                         data_to_predict, return_type="dataframe")   # Extract via patsy the data
-    # # pdata_y = data_to_predict[self._gs_measure_]
-
-    # from tmle_utils import get_model_cat_cont_split_patsy_matrix, append_target_to_df
-    # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-    #                                                                                                                                          cat_vars, cont_vars, cat_unique_levels)
-    # fit_df = append_target_to_df(ydata, xdata, tmle._gs_measure_)  
-
-    # # initiate best model
-    # # self.best_model = None
-    # # self.best_loss = np.inf        
-
-    # # instantiate model
-    # # self.n_output = n_output
-    
-
-    # model_cat_vars_new = ['A_30']
-    # model_cont_vars_new = ['L', 'statin', 'R_1', 'R_2', 'R_3']
-    # model_cat_unique_levels_new = {'A_30':31}
-    # mlp_learner.model = mlp_learner._build_model(model_cat_vars_new, 
-    #                                              model_cont_vars_new, 
-    #                                              model_cat_unique_levels_new, n_output)
-
-    # # mlp_learner.model = mlp_learner._build_model(model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
-    # mlp_learner.optimizer = mlp_learner._optimizer()
-    # mlp_learner.n_output = n_output
-    # mlp_learner.criterion = mlp_learner._loss_fn()
-
-    # # target is exposure for nuisance models, outcome for outcome model
-    # fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
-
-
-    # # splits, dset = mlp_learner._data_preprocess(fit_df, tmle._gs_measure_,
-    # #                                             model_cat_vars=model_cat_vars, 
-    # #                                             model_cont_vars=model_cont_vars, 
-    # #                                             model_cat_unique_levels=model_cat_unique_levels)
-    # splits, dset = mlp_learner._data_preprocess(fit_df, tmle._gs_measure_,
-    #                                             model_cat_vars=model_cat_vars_new, 
-    #                                             model_cont_vars=model_cont_vars_new, 
-    #                                             model_cat_unique_levels=model_cat_unique_levels_new)
-
-    # for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dset)))):
-    #     print('Fold {}'.format(fold + 1))
-    #     train_loader, valid_loader = get_kfold_dataloaders(dset, train_idx, val_idx, 
-    #                                                        batch_size=16,
-    #                                                        shuffle=True)
-    #     break
-
-    # epochs = 10
-    # mlp_learner.train_loader = train_loader
-    # mlp_learner.valid_loader = valid_loader
-    # for epoch in range(epochs):
-    #     print(f'============================= Epoch {epoch + 1}: Training =============================')
-    #     loss_train, metrics_train = mlp_learner.train_epoch(epoch)
-    #     print(f'============================= Epoch {epoch + 1}: Validation =============================')
-    #     loss_valid, metrics_valid = mlp_learner.valid_epoch(epoch)
-
-    # for i, (x_cat, x_cont, y, idx) in enumerate(train_loader):
-    #     # send to device
-    #     x_cat, x_cont, y = x_cat.to(device), x_cont.to(device), y.to(device) 
-
-
-    #     # zero the parameter gradients
-    #     mlp_learner.optimizer.zero_grad()
-
-    #     # forward + backward + optimize
-    #     outputs = mlp_learner.model(x_cat, x_cont)
-    #     if mlp_learner.n_output == 2: # binary classification
-    #         # BCEWithLogitsLoss requires target as float, same size as outputs
-    #         y = y.float() 
-    #     else:
-    #         # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-    #         y = y.long().squeeze(-1) 
-    #     loss = mlp_learner.criterion(outputs, y)
-    #     loss.backward()
-    #     mlp_learner.optimizer.step()
-
-    #     # metrics
-    #     metrics = mlp_learner._metrics(outputs, y)
-
-    #     print(loss)
-    #     print(metrics)
-
-    # mlp_learner.model
-    # mlp_learner.model.module.embedding_layers[0].weight
-
-    # from tmle_utils import get_probability_from_multilevel_prediction
-    # pred = mlp_learner.predict(fit_df, tmle._gs_measure_, 
-    #                            model_cat_vars, model_cont_vars, model_cat_unique_levels, n_output)
-    # pred = np.concatenate(pred, 0)
-    # pred = get_probability_from_multilevel_prediction(pred, ydata) 
-
-    # p=0.35
-    # samples=100
-    # seed=None
-    # pooled_df = tmle._generate_pooled_sample(p=p, samples=samples, seed=seed)
-    # pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()
-
-    # pooled_data_restricted.columns
-    # tmle.df_restricted.columns
-
-    # import patsy
-    # xdata = patsy.dmatrix(tmle._gs_model + ' - 1', 
-    #                       pooled_data_restricted, return_type="dataframe")       # Extract via patsy the data
-    # pdata = patsy.dmatrix(tmle._gs_model + ' - 1', 
-    #                       tmle.df_restricted, return_type="dataframe")   # Extract via patsy the data
-    
-    # xdata
-    # pdata
-
-    # pd.unique(pooled_data_restricted[tmle._gs_measure_]).shape[0]
-    # tmle._gs_measure_
-
-    # pd.unique(pooled_data_restricted[tmle.exposure])
-
-    # from tmle_utils import get_model_cat_cont_split_patsy_matrix
-    # model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-    #                                                                                                                                          tmle.cat_vars, tmle.cont_vars, tmle.cat_unique_levels)
-
-    # model_cat_unique_levels
-
-    # import statsmodels.api as sm
-    # import statsmodels.formula.api as smf
-    # data_to_fit = pooled_data_restricted.copy()
-    # data_to_predict = tmle.df_restricted.copy()
-
-    # gs_model = tmle._gs_measure_ + ' ~ ' + tmle._gs_model     # Setup the model form
-    # # if self._gs_custom_ is None:                              # If no custom model provided
-    # f = sm.families.family.Poisson()                      # ... GLM with Poisson family
-    # treat_s_model = smf.glm(gs_model,                     # Estimate model
-    #                         data_to_fit,                  # ... with data to fit
-    #                         family=f).fit()               # ... and Poisson distribution
-    # # if store_model:                                       # If estimating denominator
-    # #     self._treatment_models.append(treat_s_model)      # ... store the model
-    # pred = treat_s_model.predict(data_to_predict)         # Predicted values with data to predict
-
-    # # # If verbose requested, provide model output
-    # # if self._verbose_:
-    # #     print('==============================================================================')
-    # #     print(verbose_label+': '+self._gs_measure_)
-    # #     print(treat_s_model.summary())
-
-    # from scipy.stats import poisson, norm
-    # pr_s = poisson.pmf(data_to_predict[tmle._gs_measure_], pred)
-
-    # data_to_predict[tmle._gs_measure_]
-
-    # # Example of target with class indices
-    # loss = nn.CrossEntropyLoss()
-    # input = torch.randn(3, 5, requires_grad=True)
-    # target = torch.empty(3, dtype=torch.long).random_(5)
-    # output = loss(input, target)
-    # output.backward()
-    # # Example of target with class probabilities
-    # input = torch.randn(3, 5, requires_grad=True)
-    # target = torch.randn(3, 5).softmax(dim=1)
-    # output = loss(input, target)
-    # output.backward()
-
-    # input[0, 4]
-
-    # tmp = target.unsqueeze(-1) #[num_samples, 1]
-    # input[tmp]
-
-    # ydata = pooled_data_restricted[tmle._gs_measure_] 
-
-    # torch.index_select(input, 1, target)
-
-    # a = torch.arange(12).view(3,4)
-    # a
-    # idx = torch.tensor([[1,3],[0,1],[2,3]])
-    # a[torch.arange(a.size(0)).unsqueeze(1), idx]
-
-    # torch.arange(a.size(0)).unsqueeze(1)
-
-    # input[torch.arange(input.size(0)).unsqueeze(1), tmp]
-
-
-    # loss = nn.BCEWithLogitsLoss()
-    # input = torch.randn(3, requires_grad=True)
-    # target = torch.empty(3).random_(2)
-    # output = loss(input, target)
-    # output.backward()
-
-    # # BCEwithlogits requires target as float, but softmax requires class indicies as int/long
-
-    # m = nn.Softmax(dim=-1)
-    # input = torch.randn(2, 3)
-    # output = m(input)
-    # output
-
-    
-    # dummy_target = pooled_data_restricted[tmle._gs_measure_].to_numpy(dtype='int') 
-    # dummy_target.shape
-    # dummy_pred = np.random.randn(dummy_target.shape[0], 7)
-    # dummy_pred.shape
-    # pred_correct = dummy_pred[np.arange(dummy_pred.shape[0])[:, np.newaxis], dummy_target[:, np.newaxis]]
-    # pred_correct.shape
-
-    # type(pooled_data_restricted[tmle._gs_measure_])
-    # type(dummy_target)
-
-    # import random
-    # import numpy as np
-    # import pandas as pd
-    # import networkx as nx
-    # from scipy.stats import logistic
-
-    # from beowulf.dgm.utils import (network_to_df, fast_exp_map, exposure_restrictions,
-    #                             odds_to_probability, probability_to_odds)
-    
-    # from beowulf import load_uniform_vaccine, load_random_vaccine
-
-    # n=500
-
-    # # uniform
-    # G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
-
-
-    # # params
-    # network = G
-    # restricted = False
-    # time_limit = 10
-    # inf_duration = 5
-    # update_split = True
-
-
-    # graph = network.copy()
-    # data = network_to_df(graph)
-
-    # adj_matrix = nx.adjacency_matrix(graph, weight=None)
-    # data['A_sum'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='sum')
-    # data['A_mean'] = fast_exp_map(adj_matrix, np.array(data['A']), measure='mean')
-    # data['H_sum'] = fast_exp_map(adj_matrix, np.array(data['H']), measure='sum')
-    # data = pd.merge(data, pd.DataFrame.from_dict(dict(network.degree),
-    #                                              orient='index').rename(columns={0: 'F'}),
-    #                 how='left', left_index=True, right_index=True)
-
-    # # Running Data Generating Mechanism for A
-    # pr_a = logistic.cdf(-1.9 + 1.75*data['A'] + 1.*data['H']
-    #                     + 1.*data['H_sum'] + 1.3*data['A_sum'] - 0.65*data['F'])
-    # vaccine = np.random.binomial(n=1, p=pr_a, size=nx.number_of_nodes(graph))
-    # data['vaccine'] = vaccine
-    # if restricted:  # if we are in the restricted scenarios
-    #     attrs = exposure_restrictions(network=network.graph['label'], exposure='vaccine',
-    #                                   n=nx.number_of_nodes(graph))
-    #     data.update(pd.DataFrame(list(attrs.values()), index=list(attrs.keys()), columns=['vaccine']))
-
-    # # print("Pr(V):", np.mean(vaccine))
-    # for n in graph.nodes():
-    #     graph.nodes[n]['vaccine'] = int(data.loc[data.index == n, 'vaccine'].values)
-    
-    # # inside outbreak
-    # duration = inf_duration
-    # limit = time_limit
-    # # Adding node attributes
-    # for n, d in graph.nodes(data=True):
-    #     d['D'] = 0
-    #     d['R'] = 0
-    #     d['t'] = 0
-
-    # # Selecting initial infections
-    # all_ids = [n for n in graph.nodes()]
-    # # infected = random.sample(all_ids, 5)
-    # if len(all_ids) <= 500:
-    #     infected = [4, 36, 256, 305, 443]
-    # elif len(all_ids) == 1000:
-    #     infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946]
-    # elif len(all_ids) == 2000:
-    #     infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946,
-    #                 1112, 1204, 1243, 1253, 1283, 1339, 1352, 1376, 1558, 1702]
-    # else:
-    #     raise ValueError("Invalid network IDs")
-
-    # # Running through infection cycle
-    # graph_by_time = []
-    # time = 0
-    # while time < limit:  # Simulate outbreaks until time-step limit is reached
-    #     time += 1
-    #     for inf in sorted(infected, key=lambda _: random.random()):
-    #         # Book-keeping for infected nodes
-    #         graph.nodes[inf]['D'] = 1
-    #         graph.nodes[inf]['t'] += 1
-    #         if graph.nodes[inf]['t'] > duration:
-    #             graph.nodes[inf]['I'] = 0         # Node is no longer infectious after this loop
-    #             graph.nodes[inf]['R'] = 1         # Node switches to Recovered
-    #             infected.remove(inf)
-
-    #         # Attempt infections of neighbors
-    #         for contact in nx.neighbors(graph, inf):
-    #             if graph.nodes[contact]["D"] == 1:
-    #                 pass
-    #             else:
-    #                 pr_y = logistic.cdf(- 2.5
-    #                                     - 1.0*graph.nodes[contact]['vaccine']
-    #                                     - 0.2*graph.nodes[inf]['vaccine']
-    #                                     + 1.0*graph.nodes[contact]['A']
-    #                                     - 0.2*graph.nodes[contact]['H'])
-    #                 if np.random.binomial(n=1, p=pr_y, size=1):
-    #                     graph.nodes[contact]['I'] = 1
-    #                     graph.nodes[contact]["D"] = 1
-    #                     infected.append(contact)
-    #     graph_by_time.append(graph.copy()) # save all variables and nodes for each time point
-    
-    # len(graph_by_time)
-    # graph_by_time[0]
-
-    # data_0 = network_to_df(graph_by_time[0])
-    # data_0
-    # data_1 = network_to_df(graph_by_time[1])
-    # data_1
-
-    # for i in range(len(graph_by_time)):
-    #     print(network_to_df(graph_by_time[i]))
-
-    # tmp = network_to_df(graph_by_time[-1])
-    # tmp['I'].fillna(2., inplace=True)
-    # tmp
-
-    # pd.unique(network_to_df(graph_by_time[-1])['I'])
-    # pd.unique(network_to_df(graph_by_time[-1])['t'])
-    # pd.unique(network_to_df(graph_by_time[-1])['D'])
-    # pd.unique(network_to_df(graph_by_time[-1])['R'])
-    # pd.unique(network_to_df(graph_by_time[-1])['vaccine'])
-    # pd.unique(network_to_df(graph_by_time[-1])['A'])
-    # pd.unique(network_to_df(graph_by_time[-1])['H'])
-
-    ''' 
-    'D' represents during the time_limit, have this individual ever been infected;
-    for 'I', representing infectious ability, where 1. means can infect others, 0. means lose the ability to infect others,
-    Nan means never been infected and thus unknown, should be recoded to 2.
-    '''
