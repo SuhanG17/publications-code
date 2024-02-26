@@ -598,7 +598,7 @@ if __name__ == '__main__':
     # loading uniform network with diet W
     G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=500, return_cat_cont_split=True)
     # Simulation single instance of exposure and outcome
-    H, cat_vars, cont_vars, cat_unique_levels, network_list = vaccine_dgm_time_series(network=G, restricted=False, 
+    H, network_list, cat_vars, cont_vars, cat_unique_levels = vaccine_dgm_time_series(network=G, restricted=False, 
                                                                                       update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
     
     ## network-TMLE applies to generated data
