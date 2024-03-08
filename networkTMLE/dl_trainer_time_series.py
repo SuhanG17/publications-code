@@ -34,7 +34,7 @@ class AbstractMLTS:
         self.device = device
 
     def fit(self, df_list, target, use_all_time_slices=True, T=10,
-            adj_matrix=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
+            adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
             n_output=2, _continuous_outcome=False, custom_path=None):
         # initiate best model
         self.best_model = None
@@ -43,7 +43,7 @@ class AbstractMLTS:
         # instantiate model
         self.n_output = n_output
         self._continuous_outcome = _continuous_outcome
-        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, T,
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T,
                                        n_output, _continuous_outcome).to(self.device)
         self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
@@ -140,14 +140,14 @@ class AbstractMLTS:
             return custom_path
 
     def predict(self, df_list, target, use_all_time_slices=True, T=10,
-                adj_matrix=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
+                adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
                 n_output=2, _continuous_outcome=False, custom_path=None):
         print(f'============================= Predicting =============================')
         # instantiate model
         self.n_output = n_output
         self._continuous_outcome = _continuous_outcome
 
-        self.model = self._build_model(adj_matrix, model_cat_vars, model_cont_vars, model_cat_unique_levels, T, 
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T, 
                                        n_output, _continuous_outcome).to(self.device)
         self._load_model(custom_path)
         self.criterion = self._loss_fn()
@@ -518,11 +518,11 @@ class MLPTS(AbstractMLTS):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, adj_matrix, 
+    def _build_model(self, adj_matrix_list, 
                     model_cat_vars, model_cont_vars, model_cat_unique_levels, T,
                     n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = MLPModelTimeSeries(adj_matrix, model_cat_unique_levels, n_cont, T, 
+        net = MLPModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T, 
                                  n_output, _continuous_outcome)
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
@@ -542,11 +542,11 @@ class GCNTS(AbstractMLTS):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, adj_matrix, 
+    def _build_model(self, adj_matrix_list, 
                      model_cat_vars, model_cont_vars, model_cat_unique_levels, T, 
                      n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = GCNModelTimeSeries(adj_matrix, model_cat_unique_levels, n_cont, T, 
+        net = GCNModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T, 
                                  n_output, _continuous_outcome) 
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
@@ -565,11 +565,11 @@ class CNNTS(AbstractMLTS):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, adj_matrix, 
+    def _build_model(self, adj_matrix_list, 
                      model_cat_vars, model_cont_vars, model_cat_unique_levels, T, 
                      n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = CNNModelTimeSeries(adj_matrix, model_cat_unique_levels, n_cont, T, 
+        net = CNNModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T, 
                                  n_output, _continuous_outcome) 
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")

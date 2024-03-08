@@ -164,6 +164,42 @@ def exposure_restrictions(network, exposure, n):
                          1006: {exposure: 1}, 1038: {exposure: 0}, 1062: {exposure: 0}, 1202: {exposure: 0},
                          1225: {exposure: 0}, 1347: {exposure: 0}, 1348: {exposure: 0}, 1423: {exposure: 0},
                          1424: {exposure: 0}, 1679: {exposure: 0}, 1755: {exposure: 1}, 1957: {exposure: 0}}
+        elif exposure == 'social_dist':
+            if n == 500:
+                attrs = {3: {exposure: 1}, 121: {exposure: 1}, 140: {exposure: 1}, 149: {exposure: 1}, 196: {exposure: 1},
+                         247: {exposure: 1}, 279: {exposure: 1}, 381: {exposure: 1}, 390: {exposure: 1}, 391: {exposure: 1}, }
+            elif n == 1000:
+                attrs = {1: {exposure: 0}, 72: {exposure: 1}, 311: {exposure: 1}, 327: {exposure: 0}, 331: {exposure: 0},
+                         334: {exposure: 0}, 517: {exposure: 1}, 613: {exposure: 0}, 618: {exposure: 0}, 658: {exposure: 0},
+                         783: {exposure: 1}, 816: {exposure: 0}, 820: {exposure: 1}, 910: {exposure: 1}, 960: {exposure: 0}, }
+            elif n == 2000:
+                attrs = {1: {exposure: 1}, 118: {exposure: 1}, 306: {exposure: 0}, 321: {exposure: 1},
+                         410: {exposure: 0}, 411: {exposure: 0}, 450: {exposure: 0}, 530: {exposure: 0},
+                         567: {exposure: 0}, 571: {exposure: 0}, 602: {exposure: 0}, 606: {exposure: 0},
+                         641: {exposure: 0}, 661: {exposure: 0}, 681: {exposure: 0}, 690: {exposure: 1},
+                         691: {exposure: 1}, 729: {exposure: 0}, 821: {exposure: 0}, 836: {exposure: 1},
+                         858: {exposure: 0}, 901: {exposure: 0}, 939: {exposure: 1}, 973: {exposure: 1},
+                         1006: {exposure: 1}, 1038: {exposure: 0}, 1062: {exposure: 0}, 1202: {exposure: 0},
+                         1225: {exposure: 0}, 1347: {exposure: 0}, 1348: {exposure: 0}, 1423: {exposure: 0},
+                         1424: {exposure: 0}, 1679: {exposure: 0}, 1755: {exposure: 1}, 1957: {exposure: 0}}
+        elif exposure == 'quarantine':
+            if n == 500:
+                attrs = {3: {exposure: 1}, 121: {exposure: 1}, 140: {exposure: 0}, 149: {exposure: 0}, 196: {exposure: 1},
+                         247: {exposure: 1}, 279: {exposure: 0}, 381: {exposure: 1}, 390: {exposure: 0}, 391: {exposure: 0}, }
+            elif n == 1000:
+                attrs = {1: {exposure: 0}, 72: {exposure: 1}, 311: {exposure: 1}, 327: {exposure: 0}, 331: {exposure: 0},
+                         334: {exposure: 0}, 517: {exposure: 1}, 613: {exposure: 0}, 618: {exposure: 0}, 658: {exposure: 0},
+                         783: {exposure: 1}, 816: {exposure: 0}, 820: {exposure: 1}, 910: {exposure: 1}, 960: {exposure: 0}, }
+            elif n == 2000:
+                attrs = {1: {exposure: 1}, 118: {exposure: 1}, 306: {exposure: 0}, 321: {exposure: 1},
+                         410: {exposure: 0}, 411: {exposure: 0}, 450: {exposure: 0}, 530: {exposure: 0},
+                         567: {exposure: 0}, 571: {exposure: 0}, 602: {exposure: 0}, 606: {exposure: 0},
+                         641: {exposure: 0}, 661: {exposure: 0}, 681: {exposure: 0}, 690: {exposure: 1},
+                         691: {exposure: 1}, 729: {exposure: 0}, 821: {exposure: 0}, 836: {exposure: 1},
+                         858: {exposure: 0}, 901: {exposure: 0}, 939: {exposure: 1}, 973: {exposure: 1},
+                         1006: {exposure: 1}, 1038: {exposure: 0}, 1062: {exposure: 0}, 1202: {exposure: 0},
+                         1225: {exposure: 0}, 1347: {exposure: 0}, 1348: {exposure: 0}, 1423: {exposure: 0},
+                         1424: {exposure: 0}, 1679: {exposure: 0}, 1755: {exposure: 1}, 1957: {exposure: 0}} 
             else:
                 raise ValueError("Invalid N for the network")
         else:

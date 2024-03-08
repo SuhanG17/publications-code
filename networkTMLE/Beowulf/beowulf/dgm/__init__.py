@@ -14,3 +14,4 @@ from .statin_with_cat_cont_split import statin_dgm, statin_dgm_truth
 from .naloxone_with_cat_cont_split import naloxone_dgm, naloxone_dgm_truth
 from .diet_with_cat_cont_split import diet_dgm, diet_dgm_truth
 from .vaccine_with_cat_cont_split import vaccine_dgm, vaccine_dgm_truth, vaccine_dgm_time_series
+from .quaratine_with_cat_cont_split import social_dist_dgm, social_dist_dgm_truth, quarantine_dgm_time_series, quarantine_dgm_truth

@@ -756,7 +756,7 @@ def get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, mo
     return model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final
 
 def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, pdata_y_list, exposure, use_all_time_slices,
-                             adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output_list, 
+                             adj_matrix_list, cat_vars, cont_vars, cat_unique_levels, n_output_list, 
                              custom_path, **kwargs):
     """Internal function to fit custom_models for the exposure nuisance model and generate the predictions.
 
@@ -776,8 +776,11 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
         Exposure patamerter to predict
     use_all_time_slices: bool
         if use outcome data from all time slices to train the model
-    adj_matrix: SciPy sparse array
-        adjacency matrix for GCN model
+    adj_matrix_list: list of SciPy sparse array
+        list of adjacency matrix for GCN model, len() = T, 
+        adj_matrix_list[i] is a SciPy sparse array for observed data
+                           is a list of Scipy sparse array for pooled data
+        accomendations are made in GCNModelTimeSeries() model
     cat_vars: list
         list of categorical variables for df_restricted, not xdata
     cont_vars: list
@@ -838,12 +841,12 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
         setattr(deep_learner, param, value)    
 
     best_model_path = deep_learner.fit(fit_df_list, exposure, use_all_time_slices, T,
-                                       adj_matrix, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
+                                       adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                        n_output_final, custom_path=custom_path)
 
     # Generating predictions
     pred = deep_learner.predict(pred_df_list, exposure, use_all_time_slices, T,
-                                adj_matrix, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
+                                adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                 n_output_final, custom_path=custom_path)
     pred = np.concatenate(pred, 0)
     # [[batch_size, n_output, T], [batch_size, n_output, T] ...] -> [sample_size, n_output, T]
@@ -858,7 +861,7 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
 
 
 def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, outcome, use_all_time_slices,
-                            adj_matrix, cat_vars, cont_vars, cat_unique_levels, n_output_list, _continuous_outcome,
+                            adj_matrix_list, cat_vars, cont_vars, cat_unique_levels, n_output_list, _continuous_outcome,
                             predict_with_best=False, custom_path=None):
     """Internal function to fit custom_models for the outcome nuisance model.
 
@@ -874,8 +877,11 @@ def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, outcome, use_a
         outcome patamerter to predict
     use_all_time_slices: bool
         if use outcome data from all time slices to train the model
-    adj_matrix: SciPy sparse array
-        adjacency matrix for GCN model
+    adj_matrix_list: list of SciPy sparse array
+        list of adjacency matrix for GCN model, len() = T, 
+        adj_matrix_list[i] is a SciPy sparse array for observed data
+                           is a list of Scipy sparse array for pooled data
+        accomendations are made in GCNModelTimeSeries() model
     cat_vars: list
         list of categorical variables for df_restricted, not xdata
     cont_vars: list
@@ -936,12 +942,12 @@ def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, outcome, use_a
     if not predict_with_best:
         # Fitting model
         best_model_path = deep_learner.fit(deep_learner_df_list, outcome, use_all_time_slices, T,
-                                           adj_matrix, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
+                                           adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                            n_output_final, _continuous_outcome, custom_path=custom_path)
 
     # Generating predictions
     pred = deep_learner.predict(deep_learner_df_list, outcome, use_all_time_slices, T,
-                                adj_matrix, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
+                                adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                 n_output=n_output_final, _continuous_outcome=_continuous_outcome, custom_path=custom_path)
     pred = np.concatenate(pred, 0) 
     # [[batch_size, n_output, T], [batch_size, n_output, T] ...] -> [sample_size, n_output, T]
