@@ -24,6 +24,8 @@ class MLPModel(nn.Module):
         self.emb_drop = nn.Dropout(0.6)
         self.drops = nn.Dropout(0.3)
 
+        self._init_weights()
+
     def _get_embedding_layers(self, model_cat_unique_levels):
         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
         # decide embedding sizes
@@ -33,6 +35,19 @@ class MLPModel(nn.Module):
         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
 
         return embedding_layers, n_emb
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.Embedding):
+                nn.init.uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
     
     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
         if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
@@ -100,6 +115,7 @@ class MLPModelTimeSeries(nn.Module):
         self.ts_lin1 = nn.Linear(T, 16)
         self.ts_lin2 = nn.Linear(16, T)
 
+        self._init_weights()
 
     def _get_embedding_layers(self, model_cat_unique_levels):
         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
@@ -110,6 +126,19 @@ class MLPModelTimeSeries(nn.Module):
         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
 
         return embedding_layers, n_emb
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.Embedding):
+                nn.init.uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0) 
     
     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
         # x_cat: [batch_size, num_cat_vars, T]
@@ -224,6 +253,8 @@ class GCNModel(nn.Module):
         self.emb_drop = nn.Dropout(0.6)
         self.drops = nn.Dropout(0.3)
 
+        self._init_weights()
+
     def _get_embedding_layers(self, model_cat_unique_levels):
         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
         # decide embedding sizes
@@ -243,6 +274,19 @@ class GCNModel(nn.Module):
         adj_subset = torch.index_select(adj_matrix_tensor, dim=0, index=caliberated_batches_nodes_indices)
         adj_subset = torch.index_select(adj_subset, dim=1, index=caliberated_batches_nodes_indices)
         return adj_subset
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.Embedding):
+                nn.init.uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
         if len(self.embedding_layers) > 0: # if there are categorical variables to be encoded
@@ -354,7 +398,7 @@ class GCNModelTimeSeries(nn.Module):
         self.ts_lin1 = nn.Linear(T, T)
         self.ts_lin2 = nn.Linear(T, T)
 
-
+        self._init_weights()
 
     def _get_embedding_layers(self, model_cat_unique_levels):
         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
@@ -365,6 +409,19 @@ class GCNModelTimeSeries(nn.Module):
         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
 
         return embedding_layers, n_emb
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.Embedding):
+                nn.init.uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def _get_adj_subset(self, adj_matrix, batched_nodes_indices):
         # bring adj_matrix to device
@@ -622,6 +679,8 @@ class CNNModelTimeSeries(nn.Module):
         self.drop1 = nn.Dropout(0.3)
         self.drop2 = nn.Dropout(0.3)
 
+        self._init_weights()
+
     def _get_embedding_layers(self, model_cat_unique_levels):
         # Ref: https://jovian.ml/aakanksha-ns/shelter-outcome
         # decide embedding sizes
@@ -631,6 +690,19 @@ class CNNModelTimeSeries(nn.Module):
         # n_cont = dataset.x_cont.shape[1] # number of continuous variables
 
         return embedding_layers, n_emb
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.Embedding):
+                nn.init.uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
     
     def forward(self, x_cat, x_cont, batched_nodes_indices=None):
         # x_cat: [batch_size, num_cat_vars, T]

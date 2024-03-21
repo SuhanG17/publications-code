@@ -335,6 +335,10 @@ def quarantine_dgm_time_series(network, restricted=False,
             # apply quarantine if the nodes is a contact of inf, implemented in the neigbors loop below
             data['I_sum'] = fast_exp_map(adj_matrix, np.array(data['I']), measure='sum')
             data['I_ratio'] = data['I_sum'] / data['F'] # ratio of infected neighbors
+
+            # add I_ratio to graph data
+            for n in graph.nodes():
+                graph.nodes[n]['I_ratio'] = int(data.loc[data.index == n, 'I_ratio'].values)
             
             pr_a = logistic.cdf(- 3.5 
                                 + 1.0*data['A'] + 0.5*data['H']
@@ -468,6 +472,10 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
             # apply quarantine if the nodes is a contact of inf, implemented in the neigbors loop below
             data['I_sum'] = fast_exp_map(adj_matrix, np.array(data['I']), measure='sum')
             data['I_ratio'] = data['I_sum'] / data['F'] # ratio of infected neighbors
+
+            # add I_ratio to graph data
+            for n in graph.nodes():
+                graph.nodes[n]['I_ratio'] = int(data.loc[data.index == n, 'I_ratio'].values)
 
             # Running Data Generating Mechanism for A
             if shift: # If a shift in the Odds distribution is instead specified
