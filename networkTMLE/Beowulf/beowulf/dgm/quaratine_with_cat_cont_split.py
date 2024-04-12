@@ -306,6 +306,7 @@ def quarantine_dgm_time_series(network, restricted=False,
     time = 0
     while time < time_limit:  # Simulate outbreaks until time-step limit is reached
         time += 1
+        print(f'time {time}')
         edge_to_remove = []
         # for inf in sorted(infected, key=lambda _: random.random()):
         for inf in sorted(infected, key=lambda _: rng.random()):
@@ -338,7 +339,7 @@ def quarantine_dgm_time_series(network, restricted=False,
 
             # add I_ratio to graph data
             for n in graph.nodes():
-                graph.nodes[n]['I_ratio'] = int(data.loc[data.index == n, 'I_ratio'].values)
+                graph.nodes[n]['I_ratio'] = float(data.loc[data.index == n, 'I_ratio'].values)
             
             pr_a = logistic.cdf(- 3.5 
                                 + 1.0*data['A'] + 0.5*data['H']
@@ -396,6 +397,7 @@ def quarantine_dgm_time_series(network, restricted=False,
     if update_split:
         cat_vars.append('quarantine')
         cat_unique_levels['quarantine'] = pd.unique(data['quarantine'].astype('int')).max() + 1
+        cont_vars.append('I_ratio')
         return graph, graph_saved_by_time, cat_vars, cont_vars, cat_unique_levels
     else:
         return graph, graph_saved_by_time
@@ -443,6 +445,7 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
     time = 0
     while time < time_limit:  # Simulate outbreaks until time-step limit is reached
         time += 1
+        print(f'time {time}')
         edge_to_remove = []
         # for inf in sorted(infected, key=lambda _: random.random()):
         for inf in sorted(infected, key=lambda _: rng.random()):
@@ -475,7 +478,7 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
 
             # add I_ratio to graph data
             for n in graph.nodes():
-                graph.nodes[n]['I_ratio'] = int(data.loc[data.index == n, 'I_ratio'].values)
+                graph.nodes[n]['I_ratio'] = float(data.loc[data.index == n, 'I_ratio'].values)
 
             # Running Data Generating Mechanism for A
             if shift: # If a shift in the Odds distribution is instead specified
@@ -495,16 +498,35 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
                 # print(quarantine)
                 data['quarantine'] = quarantine
             else:
-                # select candidates for quarantine based on the ratio of infected neighbors
+                # select candidates for quarantine based on the degree
                 if mode == 'top':
                     num_candidates = math.ceil(data.shape[0] * percent_candidates)
-                    candidates_nodes = data.nlargest(num_candidates, 'I_ratio').index
+                    candidates_nodes = data.nlargest(num_candidates, 'F').index # super-spreader
                 elif mode == 'bottom':
                     num_candidates = math.ceil(data.shape[0] * percent_candidates)
-                    candidates_nodes = data.nsmallest(num_candidates, 'I_ratio').index
+                    candidates_nodes = data.nsmallest(num_candidates, 'F').index # super-defender
                 elif mode == 'all':
                     num_candidates = data.shape[0]
                     candidates_nodes = data.index
+
+                # # select candidates for quarantine based on the ratio of infected neighbors
+                # # assume that we only have budget to take care of the num_candidates nodes
+                # # so, if number of non-zero I_ratio candidates are less than the num_candidates, take care of them all
+                # # else select the top num_candidates nodes with highest I_ratio
+
+                # if mode == 'top':
+                #     num_candidates = math.ceil(data.shape[0] * percent_candidates)
+                #     if data[data['I_ratio'] > 0].shape[0] < num_candidates:
+                #         num_candidates = data[data['I_ratio'] > 0].shape[0]
+                #         candidates_nodes = data[data['I_ratio'] > 0].index
+                #     else:
+                #         candidates_nodes = data.nlargest(num_candidates, 'I_ratio').index
+                # elif mode == 'bottom':
+                #     num_candidates = math.ceil(data.shape[0] * percent_candidates)
+                #     candidates_nodes = data.nsmallest(num_candidates, 'I_ratio').index
+                # elif mode == 'all':
+                #     num_candidates = data.shape[0]
+                #     candidates_nodes = data.index
                 
                 # quarantine_piror = np.random.binomial(n=1, p=pr_a, size=num_candidates)
                 quarantine_piror = rng.binomial(n=1, p=pr_a, size=num_candidates)
@@ -512,7 +534,10 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
                 quarantine = np.zeros(data.shape[0])
                 quarantine[quarantine_nodes] = 1 
                 data['quarantine'] = quarantine
+
                 # print(f'time {time}: inf {inf} from {infected}')
+                # print(f'num_candidates : {num_candidates}')
+                # print(f'candidates_nodes : {candidates_nodes}')
                 # print(pr_a)
                 # print(quarantine)
 
@@ -568,11 +593,13 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
 if __name__ == '__main__':
 
     from beowulf import load_uniform_vaccine, load_random_vaccine
+    import json 
+    import time
     # random.seed(17)
     # np.random.seed(17)
 
-    # n=500
-    # restricted=True # only for random network
+    # n=2000
+    # restricted=False # only for random network
 
     # # proportion to be removed: if no node selection is made, the proportion is the same for all nodes
     # shift=True
@@ -582,14 +609,6 @@ if __name__ == '__main__':
     #     prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
     #                     0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
     
-    # # proportion to be removed: if selection is made on the nodes with 10% highest degree, aka super-spreaders
-    # prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
-    #                 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-        
-    # # proportion to be removed: if selection is made on the nodes with 10% lowest degree, aka super-defenders
-    # prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
-    #                 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-        
     
     # # social distancing 
     # ## uniform
@@ -641,17 +660,22 @@ if __name__ == '__main__':
     #                                                                                      random_seed=3407)
     # print(f'quarantine uniform n={n}: {cat_unique_levels}')
 
-    # # for graph in network_list:
-    # #     tmp_df = network_to_df(graph)
-    # #     print(pd.unique(tmp_df['quarantine']))
-    # #     print((tmp_df['quarantine'] == 1).sum())
+    # check if the quarantine is applied correctly
+    # df = network_to_df(network_list[9])
+    # df['I_ratio'][df['I_ratio'] > 0]
+    # len(df['I_ratio'][df['I_ratio'] > 0])
+
+    # for graph in network_list:
+    #     tmp_df = network_to_df(graph)
+    #     print(pd.unique(tmp_df['quarantine']))
+    #     print((tmp_df['quarantine'] == 1).sum())
 
     # ### ground truth
     # results = {}
     # for pr_a in prop_treated:
     #     ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=False,
     #                                                                time_limit=10, inf_duration=5,
-    #                                                                percent_candidates=0.3, mode='all',
+    #                                                                percent_candidates=0.3, mode='top',
     #                                                                random_seed=3407) 
     #     print(f'pr_a: {pr_a}')
     #     print(f'ground truth: {ground_truth_last}')
@@ -660,114 +684,141 @@ if __name__ == '__main__':
     # print(f'n:{n} | shift: {shift}')
     # print(results)
 
-    # # random
+    # random
     # G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=n, return_cat_cont_split=True)
     # H, network_list, cat_vars, cont_vars, cat_unique_levels = quarantine_dgm_time_series(G, restricted=restricted, 
-    #                                                                                     time_limit=10, inf_duration=5,
-    #                                                                                     update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
+    #                                                                                      time_limit=10, inf_duration=5,
+    #                                                                                      update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels)
     # print(f'quarantine uniform n={n}: {cat_unique_levels}')
 
-    # # for graph in network_list:
-    # #     tmp_df = network_to_df(graph)
-    # #     print(pd.unique(tmp_df['quarantine']))
-    # #     print((tmp_df['quarantine'] == 1).sum()) 
+    # for graph in network_list:
+    #     tmp_df = network_to_df(graph)
+    #     print(pd.unique(tmp_df['quarantine']))
+    #     print((tmp_df['quarantine'] == 1).sum()) 
 
     # ### ground truth
     # results = {}
     # for pr_a in prop_treated:
+    #     start = time.time()
     #     ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=restricted,
     #                                                                time_limit=10, inf_duration=5,
-    #                                                                percent_candidates=0.3, mode='bottom',
+    #                                                                percent_candidates=0.3, mode='all',
     #                                                                random_seed=3407) 
+    #     end = time.time()
+    #     print(f'time elapes: {end - start} sec')
     #     print(f'pr_a: {pr_a}')
     #     print(f'ground truth: {ground_truth_last}')
     #     print(f'grond truth all time point: {ground_truth_all}')
     #     results[pr_a] = ground_truth_last
-    # print(f'n:{n} | restricted:{restricted} | shift: {shift}')
+    # print(f'n:{n} | restricted:{restricted} | shift: {shift} | mode: None')
     # print(results)
+    # results['n'] = n
+    # results['restricted'] = restricted
+    # results['shift'] = shift
+    # with open("sample.json", "w") as outfile: 
+    #     json.dump(results, outfile)
+
+    # # save results
+    # results = {}
+    # pr_a = 0.05
+    # start = time.time()
+    # ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=restricted,
+    #                                                            time_limit=10, inf_duration=5,
+    #                                                            percent_candidates=0.3, mode='bottom',
+    #                                                            random_seed=3407) 
+    # end = time.time()
+    # print(end - start)
+    # results['n'] = n
+    # results['restricted'] = restricted
+    # results['shift'] = shift
+    # with open("sample.json", "w") as outfile: 
+    #     json.dump(results, outfile)
     
     # # loop    
-    print('+++++++++++++++++++++++++++++++++++++++ uniform graph +++++++++++++++++++++++++++++++++++++++')
-    for n in [500, 1000, 2000]:
-        for shift in [True, False]:
-            if shift:
-                prop_treated = [-2.5, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 2.5]
+    # print('+++++++++++++++++++++++++++++++++++++++ uniform graph +++++++++++++++++++++++++++++++++++++++')
+    # for n in [500, 1000, 2000]:
+    #     for shift in [True, False]:
+    #         if shift:
+    #             prop_treated = [-2.5, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 2.5]
 
-                G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
+    #             G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
 
-                results = {}
-                for pr_a in prop_treated:
-                    ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=False,
-                                                                                time_limit=10, inf_duration=5,
-                                                                                percent_candidates=0.3, mode='bottom',
-                                                                                random_seed=3407) 
-                    print(f'pr_a: {pr_a}')
-                    print(f'ground truth: {ground_truth_last}')
-                    print(f'grond truth all time point: {ground_truth_all}')
-                    results[pr_a] = ground_truth_last
-                print(f'n:{n} | shift: {shift} | mode: None')
-                print(results)
-                print()
+    #             results = {}
+    #             for pr_a in prop_treated:
+    #                 ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=False,
+    #                                                                             time_limit=10, inf_duration=5,
+    #                                                                             percent_candidates=0.3, mode='bottom',
+    #                                                                             random_seed=3407) 
+    #                 print(f'pr_a: {pr_a}')
+    #                 print(f'ground truth: {ground_truth_last}')
+    #                 print(f'grond truth all time point: {ground_truth_all}')
+    #                 results[pr_a] = ground_truth_last
+    #             print(f'n:{n} | shift: {shift} | mode: None')
+    #             print(results)
+    #             print()
         
-            else:
-                prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
-                                0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95] 
-                for mode in ['top', 'bottom', 'all']:               
-                    G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
+    #         else:
+    #             prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+    #                             0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95] 
+    #             for mode in ['top', 'bottom', 'all']:               
+    #                 G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
 
-                    results = {}
-                    for pr_a in prop_treated:
-                        ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=False,
-                                                                                    time_limit=10, inf_duration=5,
-                                                                                    percent_candidates=0.3, mode=mode,
-                                                                                    random_seed=3407) 
-                        print(f'pr_a: {pr_a}')
-                        print(f'ground truth: {ground_truth_last}')
-                        print(f'grond truth all time point: {ground_truth_all}')
-                        results[pr_a] = ground_truth_last
-                    print(f'n:{n} | shift: {shift} | mode: {mode}')
-                    print(results)
-                    print()
-    print()
-    print('+++++++++++++++++++++++++++++++++++++++ random graph +++++++++++++++++++++++++++++++++++++++')
-    for n in [500, 1000, 2000]:
-        for restricted in [True, False]:
-            for shift in [True, False]:
-                if shift:
-                    prop_treated = [-2.5, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 2.5]
+    #                 results = {}
+    #                 for pr_a in prop_treated:
+    #                     ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=False,
+    #                                                                                 time_limit=10, inf_duration=5,
+    #                                                                                 percent_candidates=0.3, mode=mode,
+    #                                                                                 random_seed=3407) 
+    #                     print(f'pr_a: {pr_a}')
+    #                     print(f'ground truth: {ground_truth_last}')
+    #                     print(f'grond truth all time point: {ground_truth_all}')
+    #                     results[pr_a] = ground_truth_last
+    #                 print(f'n:{n} | shift: {shift} | mode: {mode}')
+    #                 print(results)
+    #                 print()
+    # print()
+    # print('+++++++++++++++++++++++++++++++++++++++ random graph +++++++++++++++++++++++++++++++++++++++')
+    # for n in [500, 1000, 2000]:
+    # # for n in [2000]:
+    #     for restricted in [True, False]:
+    #         for shift in [True, False]:
+    #         # for shift in [False]:
+    #             if shift:
+    #                 prop_treated = [-2.5, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 2.5]
 
-                    G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=n, return_cat_cont_split=True)
+    #                 G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=n, return_cat_cont_split=True)
 
-                    results = {}
-                    for pr_a in prop_treated:
-                        ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=restricted,
-                                                                                time_limit=10, inf_duration=5,
-                                                                                percent_candidates=0.3, mode='bottom',
-                                                                                random_seed=3407) 
-                        print(f'pr_a: {pr_a}')
-                        print(f'ground truth: {ground_truth_last}')
-                        print(f'grond truth all time point: {ground_truth_all}')
-                        results[pr_a] = ground_truth_last
-                    print(f'n:{n} | restricted:{restricted} | shift: {shift} | mode: None')
-                    print(results)
-                    print()
+    #                 results = {}
+    #                 for pr_a in prop_treated:
+    #                     ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=restricted,
+    #                                                                             time_limit=10, inf_duration=5,
+    #                                                                             percent_candidates=0.3, mode='bottom',
+    #                                                                             random_seed=3407) 
+    #                     print(f'pr_a: {pr_a}')
+    #                     print(f'ground truth: {ground_truth_last}')
+    #                     print(f'grond truth all time point: {ground_truth_all}')
+    #                     results[pr_a] = ground_truth_last
+    #                 print(f'n:{n} | restricted:{restricted} | shift: {shift} | mode: None')
+    #                 print(results)
+    #                 print()
             
-                else:
-                    prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
-                                    0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95] 
-                    for mode in ['top', 'bottom', 'all']:               
-                        G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=n, return_cat_cont_split=True)
+    #             else:
+    #                 prop_treated = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+    #                                 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95] 
+    #                 for mode in ['top', 'bottom', 'all']:               
+    #                 # for mode in ['bottom', 'all']:               
+    #                     G, cat_vars, cont_vars, cat_unique_levels = load_random_vaccine(n=n, return_cat_cont_split=True)
 
-                        results = {}
-                        for pr_a in prop_treated:
-                            ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=restricted,
-                                                                                       time_limit=10, inf_duration=5,
-                                                                                       percent_candidates=0.3, mode=mode,
-                                                                                       random_seed=3407) 
-                            print(f'pr_a: {pr_a}')
-                            print(f'ground truth: {ground_truth_last}')
-                            print(f'grond truth all time point: {ground_truth_all}')
-                            results[pr_a] = ground_truth_last
-                        print(f'n:{n} | restricted:{restricted} | shift: {shift} | mode: {mode}')
-                        print(results)
-                        print()
+    #                     results = {}
+    #                     for pr_a in prop_treated:
+    #                         ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=restricted,
+    #                                                                                    time_limit=10, inf_duration=5,
+    #                                                                                    percent_candidates=0.3, mode=mode,
+    #                                                                                    random_seed=3407) 
+    #                         print(f'pr_a: {pr_a}')
+    #                         print(f'ground truth: {ground_truth_last}')
+    #                         print(f'grond truth all time point: {ground_truth_all}')
+    #                         results[pr_a] = ground_truth_last
+    #                     print(f'n:{n} | restricted:{restricted} | shift: {shift} | mode: {mode}')
+    #                     print(results)
+    #                     print()

@@ -17,7 +17,7 @@ from tmle_utils import (network_to_df, fast_exp_map, exp_map_individual, tmle_un
                         exposure_deep_learner_ts, outcome_deep_learner_ts,
                         targeting_step, create_threshold, create_categorical,
                         check_pooled_sample_levels, select_pooled_sample_with_observed_data,
-                        get_model_cat_cont_split_patsy_matrix, append_target_to_df, get_probability_from_multilevel_prediction)
+                        get_patsy_for_model_w_C, get_model_cat_cont_split_patsy_matrix, append_target_to_df, get_probability_from_multilevel_prediction)
 
 import torch
 
@@ -485,7 +485,10 @@ class NetworkTMLETimeSeries:
                 ydata_list = []
                 n_output_list = []
                 for df_restricted in self.df_restricted_list:
-                    xdata_list.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
+                    if 'C(' in model:
+                        xdata_list.append(get_patsy_for_model_w_C(model, df_restricted))
+                    else:
+                        xdata_list.append(patsy.dmatrix(model + ' - 1', df_restricted, return_type="dataframe"))
                     ydata_list.append(df_restricted[self.outcome])
                     n_output_list.append(pd.unique(df_restricted[self.outcome]).shape[0])
 
@@ -503,7 +506,7 @@ class NetworkTMLETimeSeries:
                 # Estimating custom_model
                 self._q_custom_ = outcome_learner_fitting(ml_model=custom_model,                                    # User-specified model
                                                           xdata=np.asarray(data),                                   # Extracted X data
-                                                          ydata=np.asarray(self.df_restricted_list[self.outcome]))
+                                                          ydata=np.asarray(self.df_restricted_list[-1][self.outcome]))
 
                 # Generating predictions
                 self._Qinit_ = outcome_learner_predict(ml_model_fit=self._q_custom_,   # Fit custom_model
@@ -627,7 +630,10 @@ class NetworkTMLETimeSeries:
                 ydata_list = []
                 n_output_list = []
                 for pooled_data_restricted in pooled_data_restricted_list:
-                    xdata_list.append(patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted, return_type="dataframe"))
+                    if 'C(' in self._q_model:
+                        xdata_list.append(get_patsy_for_model_w_C(self._q_model, pooled_data_restricted))
+                    else:
+                        xdata_list.append(patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted, return_type="dataframe"))
                     ydata_list.append(pooled_data_restricted[self.outcome])
                     n_output_list.append(pd.unique(pooled_data_restricted[self.outcome]).shape[0])
 
@@ -1226,13 +1232,13 @@ class NetworkTMLETimeSeries:
         return network_current, adj_matrix, _max_degree_
     
     def select_candiate_nodes(self, data, mode, percent_candidates, pr_a, rng):  
-        # select candidates for quarantine based on the ratio of infected neighbors
+        # select candidates for quarantine based on the nodes' degree
         if mode == 'top':
             num_candidates = math.ceil(data.shape[0] * percent_candidates)
-            candidates_nodes = data.nlargest(num_candidates, 'I_ratio').index
+            candidates_nodes = data.nlargest(num_candidates, 'degree').index
         elif mode == 'bottom':
             num_candidates = math.ceil(data.shape[0] * percent_candidates)
-            candidates_nodes = data.nsmallest(num_candidates, 'I_ratio').index
+            candidates_nodes = data.nsmallest(num_candidates, 'degree').index
         elif mode == 'all':
             num_candidates = data.shape[0]
             candidates_nodes = data.index
@@ -1304,10 +1310,11 @@ class NetworkTMLETimeSeries:
                                      size=g.shape[0])                   # ... for the N units
             else:   
                 # New mechanism to apply quarantine
-                print(f'Apply New Mechanism for Quarantine, mode {mode}, percent_candidates {percent_candidates}')
+                # print(f'Apply New Mechanism for Quarantine, mode {mode}, percent_candidates {percent_candidates}')
                 probs = self.select_candiate_nodes(data=g, 
                                                    mode=mode, percent_candidates=percent_candidates, 
                                                    pr_a=p, rng=rng)
+                # print(f'pooled probs: {probs}')
             g[self.exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degåree
                                         g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
 
@@ -1508,14 +1515,20 @@ class NetworkTMLETimeSeries:
                 pdata_y_list = []
                 n_output_list =[]
                 for i, (d2f, d2p) in enumerate(zip(data_to_fit_list, data_to_predict_list)):
-                    xdata_list.append(patsy.dmatrix(self._gi_model + ' - 1', d2f, return_type="dataframe"))
+                    if 'C(' in self._gi_model:
+                        xdata_list.append(get_patsy_for_model_w_C(self._gi_model, d2f))
+                    else:
+                        xdata_list.append(patsy.dmatrix(self._gi_model + ' - 1', d2f, return_type="dataframe"))
                     ydata_list.append(d2f[self.exposure])
                     n_output_list.append(pd.unique(d2f[self.exposure]).shape[0])
                     print(f'T_slice: {i} | gi_model | n_output: {n_output_list[i]} | target variable: {self.exposure}')
-                    pdata_list.append(patsy.dmatrix(self._gi_model + ' - 1', d2p, return_type="dataframe"))
+                    if 'C(' in self._gi_model:
+                        pdata_list.append(get_patsy_for_model_w_C(self._gi_model, d2p))
+                    else: 
+                        pdata_list.append(patsy.dmatrix(self._gi_model + ' - 1', d2p, return_type="dataframe"))
                     pdata_y_list.append(d2p[self.exposure])
                 
-                print(f'n_output_list: {n_output_list}')
+                # print(f'n_output_list: {n_output_list}')
                 custom_path = custom_path_prefix + 'A_i_' + self.exposure  + '.pth' 
                 pred = exposure_deep_learner_ts(self._gi_custom_,
                                                 xdata_list, ydata_list, pdata_list, pdata_y_list, self.exposure, self.use_all_time_slices,
@@ -1620,12 +1633,18 @@ class NetworkTMLETimeSeries:
                         data_to_fit_subset_list.append(data_to_fit_subset)
                         num_samples_used_min = data_to_fit_subset.shape[0] if data_to_fit_subset.shape[0] < num_samples_used_min else num_samples_used_min
                         print(f'T_slice: {i} | gs_model | samples used: {data_to_fit_subset.shape[0]} | samples original: {d2f.shape[0]}')
-                        pdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', d2p, return_type="dataframe"))
+                        if 'C(' in self._gs_model:
+                            pdata_list.append(get_patsy_for_model_w_C(self._gs_model, d2p))
+                        else:
+                            pdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', d2p, return_type="dataframe"))
                         pdata_y_list.append(d2p[self._gs_measure_])
 
                     for i, data_to_fit_subset in enumerate(data_to_fit_subset_list):
-                        data_to_fit_subset = data_to_fit_subset[:num_samples_used_min]                        
-                        xdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', data_to_fit_subset, return_type="dataframe"))
+                        data_to_fit_subset = data_to_fit_subset[:num_samples_used_min]
+                        if 'C(' in self._gs_model:
+                            xdata_list.append(get_patsy_for_model_w_C(self._gs_model, data_to_fit_subset))
+                        else:                        
+                            xdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', data_to_fit_subset, return_type="dataframe"))
                         ydata_list.append(data_to_fit_subset[self._gs_measure_])
                         n_output_list.append(pd.unique(data_to_fit_subset[self._gs_measure_]).shape[0])
                         print(f'T_slice: {i} | gs_model | n_output : {n_output_list[i]} | target variables: {self._gs_measure_}')

@@ -90,7 +90,7 @@ class MLPModel(nn.Module):
 
 
 class MLPModelTimeSeries(nn.Module):
-    def __init__(self, adj_matrix_list, model_cat_unique_levels, n_cont, T=10,
+    def __init__(self, adj_matrix_list, model_cat_unique_levels, n_cont, T_in=10, T_out=10,
                  n_output=2, _continuous_outcome=False):
         super(MLPModelTimeSeries, self).__init__()
         self.embedding_layers, self.n_emb = self._get_embedding_layers(model_cat_unique_levels)
@@ -112,8 +112,8 @@ class MLPModelTimeSeries(nn.Module):
         self.drops = nn.Dropout(0.3)
 
         # time dimension feature extract 
-        self.ts_lin1 = nn.Linear(T, 16)
-        self.ts_lin2 = nn.Linear(16, T)
+        self.ts_lin1 = nn.Linear(T_in, 16)
+        self.ts_lin2 = nn.Linear(16, T_out)
 
         self._init_weights()
 

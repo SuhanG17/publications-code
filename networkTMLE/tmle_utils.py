@@ -3,8 +3,9 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import statsmodels.api as sm
+import patsy
 from itertools import groupby
-
+from sklearn.utils.class_weight import compute_class_weight
 
 def probability_to_odds(prob):
     """Converts given probability (proportion) to odds
@@ -496,12 +497,40 @@ def create_categorical(data, variables, bins, labels, verbose=False):
                 
 
 ######################################### SG_modified: Deep Learning Related Functions #########################################
+def get_patsy_for_model_w_C(model_string, df_restricted_dataframe):
+    ''' For model string with C() terms, return patsy matrix dataframe with C() terms
+    The naive way of creating C() variables with patsy.dmatrix() will not work 
+    because it will create one-hot columns for each level of C() var
+    Hence, we re-define C() in dataframe for deep learners
+    '''
+    model_elem = model_string.split('+')
+    model_exclude_c = []
+    model_c = []
+    model_c_id = []
+    for id, item in enumerate(model_elem):
+        if 'C(' not in item:
+            model_exclude_c.append(item)
+        else:
+            # remove space in C() 
+            # select only the var name in C()
+            var_name = item.replace(" ", "").split('(')[1].split(')')[0] 
+            model_c.append(var_name)
+            model_c_id.append(id)
+
+    model_exclude_c = ' + '.join(model_exclude_c) 
+    patsy_matrix_dataframe = patsy.dmatrix(model_exclude_c + ' - 1', df_restricted_dataframe, return_type="dataframe") 
+    for id, item in zip(model_c_id, model_c):
+        patsy_matrix_dataframe.insert(id, 'C(' + item + ')', df_restricted_dataframe[item])
+    return patsy_matrix_dataframe
+
+
 # call with patsy_matrix_dataframe=xdata
 def get_model_cat_cont_split_patsy_matrix(patsy_matrix_dataframe, cat_vars, cont_vars, cat_unique_levels):
     '''initiate model_car_vars, model_cont_vars, and cat_unique_levles, and
     update cat_vars, cont_vars, cat_unique_levels based on patsy matrix dataframe'''
 
     vars = patsy_matrix_dataframe.columns # all variables in patsy matrix
+    # print(vars)
 
     model_cat_vars = []
     model_cont_vars = []
@@ -518,7 +547,7 @@ def get_model_cat_cont_split_patsy_matrix(patsy_matrix_dataframe, cat_vars, cont
             if '**' in var: # quadratic term, treated as continuous
                 model_cont_vars.append(var)
                 cont_vars.append(var)
-            elif 'C()' in var: # categorical term
+            elif 'C(' in var: # categorical term newly defined for model == 'np'
                 model_cat_vars.append(var)
                 model_cat_unique_levels[var] = pd.unique(patsy_matrix_dataframe[var].astype('int')).max() + 1
                 cat_vars.append(var)
@@ -755,6 +784,52 @@ def get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, mo
     
     return model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final
 
+def get_imbalance_weights(n_output_final, ydata_array_list, imbalance_threshold=3., default_lock=False):
+    ''' set weight against class imbalance
+    Parameters
+    ----------
+    n_output_final: int
+        number of classes for the outcome/exposure variables
+    ydata_array_list: list 
+        a list containing ydata_array, it can contain all time slices or a single time slice, aka the last one
+    imbalance_threshold: float
+        the threshold to correct for imbalance
+    default_lock: bool
+        if True, return default pos_weight=1. and class_weight=None, which means no weight correction
+
+    Ref:
+    https://medium.com/@zergtant/use-weighted-loss-function-to-solve-imbalanced-data-classification-problems-749237f38b75
+    
+    Returns:
+    --------
+    pos_weight: float
+        weight for positive class/negative class
+    class_weight: array
+        weight for each class if more than 2 classes
+    '''
+    pos_weight = 1.
+    class_weight = None
+
+    if default_lock:
+        return pos_weight, class_weight
+
+    if n_output_final == 2: # binary classification with BCEloss
+        imbalance_odds = (len(ydata_array_list) - sum(ydata_array_list)) / sum(ydata_array_list) # num_zeros / num_ones
+        if imbalance_odds > imbalance_threshold:
+            pos_weight = imbalance_threshold 
+            print(f'pos_weight: {pos_weight}')
+    else:
+        class_weight = compute_class_weight(class_weight="balanced", classes=np.unique(ydata_array_list), y=ydata_array_list)
+        max_min_odds = np.max(class_weight) / np.min(class_weight)
+        if max_min_odds < imbalance_threshold:
+            class_weight = None # if class balance is not severe, do not use class_weight
+        else:
+            print(f'class_weight: {class_weight}')   
+    
+    return pos_weight, class_weight
+    
+
+
 def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, pdata_y_list, exposure, use_all_time_slices,
                              adj_matrix_list, cat_vars, cont_vars, cat_unique_levels, n_output_list, 
                              custom_path, **kwargs):
@@ -812,8 +887,9 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
 
     fit_df_list = []
     pred_df_list = []
+    ydata_array_list = []
 
-    for xdata, ydata, pdata, pdata_y in zip(xdata_list, ydata_list, pdata_list, pdata_y_list):
+    for i, (xdata, ydata, pdata, pdata_y) in enumerate(zip(xdata_list, ydata_list, pdata_list, pdata_y_list)):
         model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
                                                                                                                                                  cat_vars, cont_vars, cat_unique_levels)
         model_cat_vars_list.append(model_cat_vars)
@@ -826,7 +902,11 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
 
         fit_df_list.append(append_target_to_df(ydata, xdata, exposure))
         pred_df_list.append(append_target_to_df(pdata_y, pdata, exposure))
-
+        
+        # ydata_array_list.extend(ydata.to_numpy()) # convert pd.series to np.array and merge into a large list
+        if i == len(ydata_list) - 1: # only use the last time slice
+            ydata_array_list.extend(ydata.to_numpy())
+        
     model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final = get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, model_cat_unique_levels_list)
 
     ## check if n_output is consistent 
@@ -834,18 +914,21 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
         raise ValueError("n_output are not identical throughout time slices")
     else:
         n_output_final = n_output_list[-1]    
-    
+
+    ## set weight against class imbalance
+    pos_weight, class_weight = get_imbalance_weights(n_output_final, ydata_array_list, imbalance_threshold=3.)
+
     # Fitting model
     ## update init parameters
     for param, value in kwargs.items():
         setattr(deep_learner, param, value)    
 
-    best_model_path = deep_learner.fit(fit_df_list, exposure, use_all_time_slices, T,
+    best_model_path = deep_learner.fit(fit_df_list, exposure, use_all_time_slices, T, pos_weight, class_weight,
                                        adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                        n_output_final, custom_path=custom_path)
 
     # Generating predictions
-    pred = deep_learner.predict(pred_df_list, exposure, use_all_time_slices, T,
+    pred = deep_learner.predict(pred_df_list, exposure, use_all_time_slices, T, pos_weight, class_weight,
                                 adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                 n_output_final, custom_path=custom_path)
     pred = np.concatenate(pred, 0)
@@ -916,8 +999,9 @@ def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, outcome, use_a
     cat_unique_levels_list = []
 
     deep_learner_df_list = []
+    ydata_array_list = []
 
-    for xdata, ydata in zip(xdata_list, ydata_list):
+    for i, (xdata, ydata) in enumerate(zip(xdata_list, ydata_list)):
         model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
                                                                                                                                                  cat_vars, cont_vars, cat_unique_levels)
         model_cat_vars_list.append(model_cat_vars)
@@ -929,24 +1013,29 @@ def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, outcome, use_a
         cat_unique_levels_list.append(cat_unique_levels)
 
         deep_learner_df_list.append(append_target_to_df(ydata, xdata, outcome))
+        # ydata_array_list.extend(ydata.to_numpy()) # convert pd.series to np.array and merge into a large list
+        if i == len(ydata_list) - 1: # only use the last time slice
+            ydata_array_list.extend(ydata.to_numpy())
     
     model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final = get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, model_cat_unique_levels_list)
-
 
     ## check if n_output is consistent 
     if not all_equal(n_output_list):
         raise ValueError("n_output are not identical throughout time slices")
     else:
         n_output_final = n_output_list[-1]    
+
+    ## set weight against class imbalance
+    pos_weight, class_weight = get_imbalance_weights(n_output_final, ydata_array_list, imbalance_threshold=3.)
             
     if not predict_with_best:
         # Fitting model
-        best_model_path = deep_learner.fit(deep_learner_df_list, outcome, use_all_time_slices, T,
+        best_model_path = deep_learner.fit(deep_learner_df_list, outcome, use_all_time_slices, T, pos_weight, class_weight,
                                            adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                            n_output_final, _continuous_outcome, custom_path=custom_path)
 
     # Generating predictions
-    pred = deep_learner.predict(deep_learner_df_list, outcome, use_all_time_slices, T,
+    pred = deep_learner.predict(deep_learner_df_list, outcome, use_all_time_slices, T, pos_weight, class_weight,
                                 adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                 n_output=n_output_final, _continuous_outcome=_continuous_outcome, custom_path=custom_path)
     pred = np.concatenate(pred, 0) 

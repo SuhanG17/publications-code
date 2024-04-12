@@ -33,9 +33,13 @@ class AbstractMLTS:
         self.print_per_time_slice_metrics = False # use to check if all time slices have similar performance
         self.device = device
 
-    def fit(self, df_list, target, use_all_time_slices=True, T=10,
+    def fit(self, df_list, target, use_all_time_slices=True, T_in=10, T_out=10, pos_weight=1, class_weight=None,
             adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
             n_output=2, _continuous_outcome=False, custom_path=None):
+        # initiate weights for class imbalance for loss functions
+        self.pos_weight = pos_weight
+        self.class_weight = class_weight
+
         # initiate best model
         self.best_model = None
         self.best_loss = np.inf        
@@ -43,7 +47,7 @@ class AbstractMLTS:
         # instantiate model
         self.n_output = n_output
         self._continuous_outcome = _continuous_outcome
-        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T,
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T_in, T_out,
                                        n_output, _continuous_outcome).to(self.device)
         self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
@@ -139,15 +143,19 @@ class AbstractMLTS:
         else:
             return custom_path
 
-    def predict(self, df_list, target, use_all_time_slices=True, T=10,
+    def predict(self, df_list, target, use_all_time_slices=True, T_in=10, T_out=10, pos_weight=1, class_weight=None, 
                 adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
                 n_output=2, _continuous_outcome=False, custom_path=None):
         print(f'============================= Predicting =============================')
+        # initiate weights for class imbalance for loss functions
+        self.pos_weight = pos_weight
+        self.class_weight = class_weight 
+
         # instantiate model
         self.n_output = n_output
         self._continuous_outcome = _continuous_outcome
 
-        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T, 
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T_in, T_out,  
                                        n_output, _continuous_outcome).to(self.device)
         self._load_model(custom_path)
         self.criterion = self._loss_fn()
@@ -431,10 +439,16 @@ class AbstractMLTS:
             return nn.L1Loss() # mae
             # return nn.MSELoss() # mse
         else:
-            if self.n_output == 2: # binary classification
-                return nn.BCEWithLogitsLoss() # no need for sigmoid, require 1 output for binary classfication
-            else:
-                return nn.CrossEntropyLoss() # no need for softmax, require [n_output] output for classification
+            if self.n_output == 2: # binary classification: no need for sigmoid, require 1 output for binary classfication
+                if self.pos_weight == 1:
+                    return nn.BCEWithLogitsLoss() 
+                else:
+                    return nn.BCEWithLogitsLoss(pos_weight=torch.tensor([self.pos_weight]).to(self.device)) # pos_weight to correct for class-imbalance
+            else: # multi-class classification: no need for softmax, require [n_output] output for classification
+                if self.class_weight is not None:
+                    return nn.CrossEntropyLoss(weight=torch.from_numpy(self.class_weight).to(self.device)) # weight to correct for class-imbalance
+                else:
+                    return nn.CrossEntropyLoss()
 
     def _metrics(self, outputs, labels):
         ''' calculate metrics for each time slice:
@@ -519,10 +533,10 @@ class MLPTS(AbstractMLTS):
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
     def _build_model(self, adj_matrix_list, 
-                    model_cat_vars, model_cont_vars, model_cat_unique_levels, T,
+                    model_cat_vars, model_cont_vars, model_cat_unique_levels, T_in, T_out,
                     n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = MLPModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T, 
+        net = MLPModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T_in, T_out,
                                  n_output, _continuous_outcome)
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")

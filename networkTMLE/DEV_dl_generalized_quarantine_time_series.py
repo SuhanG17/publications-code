@@ -22,7 +22,7 @@ from dl_trainer_time_series import MLPTS, GCNTS, CNNTS
 # Setting simulation parameters
 ############################################
 # n_mc = 500
-n_mc = 31
+n_mc = 30
 
 exposure = "quarantine"
 outcome = "D"
@@ -31,7 +31,8 @@ outcome = "D"
 # Running through logic from .sh script
 ########################################
 # script_name, slurm_setup = argv
-script_name, slurm_setup = 'some_script', '10010'  
+# script_name, slurm_setup = 'some_script', '10010'  
+script_name, slurm_setup = 'some_script', '20040'  
 network, n_nodes, degree_restrict, shift, model, save = simulation_setup(slurm_id_str=slurm_setup)
 sim_id = slurm_setup[4]
 seed_number = 18900567 + 10000000*int(sim_id)
@@ -75,29 +76,43 @@ distribution_gs = "poisson"
 measure_gs = "sum"
 q_estimator = None
 if model == "cc":
-    gin_model = "A + H + A_sum + H_sum + degree"
-    gsn_model = "quarantine + A + H + A_sum + H_sum + degree"
-    # qn_model = "quarantine + quarantine_mean + A + H + A_sum + H_sum + degree"
-    qn_model = "A + H + A_sum + H_sum"
-
-    # #TODO
-    # gin_model = "A + H + A_sum + H_sum + I_ratio"
-    # gsn_model = "quarantine + A + H + A_sum + H_sum + I_ratio"
+    # gin_model = "A + H + A_sum + H_sum + degree"
+    # gsn_model = "quarantine + A + H + A_sum + H_sum + degree"
+    # # qn_model = "quarantine + quarantine_mean + A + H + A_sum + H_sum + degree"
     # qn_model = "A + H + A_sum + H_sum"
 
+    #TODO
+    gin_model = "A + H + A_sum + H_sum + I_ratio"
+    gsn_model = "quarantine + A + H + A_sum + H_sum + I_ratio"
+    qn_model = "A + H + A_sum + H_sum + degree"
+
 elif model == "cw":
-    gin_model = "A + H + A_sum + H_sum + degree"
-    gsn_model = "quarantine + A + H + A_sum + H_sum + degree"
-    qn_model = "quarantine + quarantine_mean + A + H + H_t3 + degree"
+    # gin_model = "A + H + A_sum + H_sum + degree"
+    # gsn_model = "quarantine + A + H + A_sum + H_sum + degree"
+    # qn_model = "quarantine + quarantine_mean + A + H + H_t3 + degree"
+
+    gin_model = "A + H + A_sum + H_sum + I_ratio"
+    gsn_model = "quarantine + A + H + A_sum + H_sum + I_ratio"
+    qn_model = "quarantine + quarantine_mean + A + H + H_t3 + degree" 
 elif model == "wc":
-    gin_model = "A + H + H_t3 + degree"
-    gsn_model = "quarantine + A + H + H_t3 + degree"
-    qn_model = "quarantine + quarantine_mean + A + H + A_sum + H_sum + degree"
+    # gin_model = "A + H + H_t3 + degree"
+    # gsn_model = "quarantine + A + H + H_t3 + degree"
+    # qn_model = "quarantine + quarantine_mean + A + H + A_sum + H_sum + degree"
+
+    gin_model = "A + H + H_t3 + I_ratio"
+    gsn_model = "quarantine + A + H + H_t3 + I_ratio"
+    qn_model = "A + H + A_sum + H_sum + degree" 
 elif model == 'np':
-    gin_model = "A + H + C(A_sum_c) + C(H_sum_c) + degree"
-    gsn_model = "quarantine + A + H + C(A_sum_c) + C(H_sum_c) + degree"
+    # gin_model = "A + H + C(A_sum_c) + C(H_sum_c) + degree"
+    # gsn_model = "quarantine + A + H + C(A_sum_c) + C(H_sum_c) + degree"
+    # qn_model = "quarantine + quarantine_mean + A + H + C(A_sum_c) + C(H_sum_c) + degree"
+    # q_estimator = LogisticRegression(penalty='l2', max_iter=2000)
+    
+    gin_model = "A + H + C(A_sum_c) + C(H_sum_c) + I_ratio"
+    gsn_model = "quarantine + A + H + C(A_sum_c) + C(H_sum_c) + I_ratio"
     qn_model = "quarantine + quarantine_mean + A + H + C(A_sum_c) + C(H_sum_c) + degree"
-    q_estimator = LogisticRegression(penalty='l2', max_iter=2000)
+    if not use_deep_learner_outcome:
+        q_estimator = LogisticRegression(penalty='l2', max_iter=2000)
 elif model == 'ind':
     independent = True
     gi_model = "A + H"
@@ -181,7 +196,8 @@ for i in range(n_mc):
                                   cat_vars=cat_vars_i, cont_vars=cont_vars_i, cat_unique_levels=cat_unique_levels_i,
                                   use_deep_learner_A_i=use_deep_learner_A_i, 
                                   use_deep_learner_A_i_s=use_deep_learner_A_i_s, 
-                                  use_deep_learner_outcome=use_deep_learner_outcome) 
+                                  use_deep_learner_outcome=use_deep_learner_outcome,
+                                  use_all_time_slices=False) 
 
     if model in ["cw", "wc"]:
         ntmle.define_threshold(variable='H', threshold=3, definition='sum')
@@ -217,7 +233,7 @@ for i in range(n_mc):
         '''Return deep learner model based on the type of deep learner'''
         if deep_learner_type == 'mlp':
             deep_learner = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
-                                 epochs=10, print_every=5, device=device, save_path='./tmp.pth')
+                                 epochs=30, print_every=5, device=device, save_path='./tmp.pth')
         elif deep_learner_type == 'gcn':
             deep_learner = GCNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
                                  epochs=10, print_every=5, device=device, save_path='./tmp.pth')
@@ -253,7 +269,11 @@ for i in range(n_mc):
 
     ntmle.exposure_model(gin_model, custom_model=deep_learner_a_i) 
     ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=deep_learner_a_i_s)
-    ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome) 
+    if q_estimator is not None:
+        ntmle.outcome_model(qn_model, custom_model=q_estimator) 
+    else:
+        ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome)
+    
 
 
     for p in prop_treated:  # loops through all treatment plans
@@ -281,7 +301,193 @@ for i in range(n_mc):
             results.loc[i, 'lcll_'+str(p)] = np.nan
             results.loc[i, 'ucll_'+str(p)] = np.nan
 
+##################################### TEST CODE #####################################
+ntmle.exposure_model(gin_model, custom_model=deep_learner_a_i) 
+ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=deep_learner_a_i_s)
+if q_estimator is not None:
+    ntmle.outcome_model(qn_model, custom_model=q_estimator) 
+else:
+    ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome)
 
+
+ntmle._Qinit_
+
+pred = torch.from_numpy(ntmle._Qinit_)
+torch.max(pred)
+torch.min(pred)
+# pred = torch.sigmoid(pred) # get binary probability
+pred_binary = torch.round(pred) # get binary prediction
+labels = ntmle.df_restricted_list[-1][ntmle.outcome]
+labels = torch.from_numpy(labels.to_numpy())
+acc = (pred_binary == labels).sum()/labels.numel()
+print(f'self._Qinit_ accuracy: {acc:.3f}')
+
+zero_ratio = 1 - labels.sum()/labels.numel()
+print(f'zero_ratio: {zero_ratio:.3f}')
+
+labels.sum()
+
+''' Observed Data
+uniform i=4
+q_estimator accuracy: 0.820
+DL accuracy: 0.182
+
+random i=0
+q_estimator accuracy: 0.6
+DL accuracy: 0.484
+'''
+
+for i in range(10):
+    labels = ntmle.df_restricted_list[i][ntmle.outcome]
+    labels = torch.from_numpy(labels.to_numpy())
+    print(labels)
+    print()
+
+
+def get_accuracy(pred:np.ndarray, label:pd.core.series.Series):
+    pred = torch.from_numpy(pred)
+    pred_binary = torch.round(pred)
+    label = torch.from_numpy(label.to_numpy())
+    acc = (pred_binary == label).sum()/label.numel()
+    print(f'acc: {acc:.2f}')
+    return pred_binary, label, acc
+
+############### fit() ################
+from tmle_utils import targeting_step, get_patsy_for_model_w_C, outcome_deep_learner_ts, outcome_learner_predict, tmle_unit_unbound
+import patsy
+p=0.7
+samples = 500
+bound = 0.01
+seed = seed_number
+
+
+# Step 1) Estimate the weights
+# Also generates pooled_data for use in the Monte Carlo integration procedure
+ntmle._resamples_ = samples                                                              # Saving info on number of resamples
+h_iptw, pooled_data_restricted_list, pooled_adj_matrix_list = ntmle._estimate_iptw_ts_(p=p,                      # Generate pooled & estiamte weights
+                                                                                       samples=samples,           # ... for some number of samples
+                                                                                       bound=bound,               # ... with applied probability bounds
+                                                                                       seed=seed,
+                                                                                       shift=shift,
+                                                                                       mode=mode,
+                                                                                       percent_candidates=percent_candidates)                 # ... and with a random seed given
+
+# Saving some information for diagnostic procedures
+if ntmle._gs_measure_ is None:                                  # If no summary measure, use the A_sum
+    ntmle._for_diagnostics_ = pooled_data_restricted_list[-1][[ntmle.exposure, ntmle.exposure+"_sum"]].copy()
+else:                                                          # Otherwise, use the provided summary measure
+    ntmle._for_diagnostics_ = pooled_data_restricted_list[-1][[ntmle.exposure, ntmle._gs_measure_]].copy()
+
+# Step 2) Estimate from Q-model
+# process completed in .outcome_model() function and stored in self._Qinit_
+# so nothing to do here
+
+# Step 3) Target the parameter
+epsilon = targeting_step(y=ntmle.df_restricted_list[-1][ntmle.outcome],   # Estimate the targeting model given observed Y
+                            q_init=ntmle._Qinit_,                           # ... predicted values of Y under observed A
+                            ipw=h_iptw,                                    # ... weighted by IPW
+                            verbose=ntmle._verbose_)                        # ... with option for verbose info
+
+# Step 4) Monte Carlo integration (old code did in loop but faster as vector)
+#
+# Generating outcome predictions under the policies (via pooled data sets)
+if ntmle._q_custom_ is None:                                                     # If given a parametric default model
+    y_star = ntmle._outcome_model.predict(pooled_data_restricted_list[-1])       # ... predict using statsmodels syntax
+else:  # Custom input model by user
+    if ntmle.use_deep_learner_outcome:
+        xdata_list = []
+        ydata_list = []
+        n_output_list = []
+        for pooled_data_restricted in pooled_data_restricted_list:
+            if 'C(' in ntmle._q_model:
+                xdata_list.append(get_patsy_for_model_w_C(ntmle._q_model, pooled_data_restricted))
+            else:
+                xdata_list.append(patsy.dmatrix(ntmle._q_model + ' - 1', pooled_data_restricted, return_type="dataframe"))
+            ydata_list.append(pooled_data_restricted[ntmle.outcome])
+            n_output_list.append(pd.unique(pooled_data_restricted[ntmle.outcome]).shape[0])
+
+        y_star = outcome_deep_learner_ts(ntmle._q_custom_, 
+                                            xdata_list, ydata_list, ntmle.outcome, ntmle.use_all_time_slices,
+                                            pooled_adj_matrix_list, ntmle.cat_vars, ntmle.cont_vars, ntmle.cat_unique_levels, n_output_list, ntmle._continuous_outcome_list_[-1],
+                                            predict_with_best=True, custom_path=ntmle._q_custom_path_)
+    else:
+        d = patsy.dmatrix(ntmle._q_model + ' - 1', pooled_data_restricted_list[-1])  # ... extract data via patsy
+        y_star = outcome_learner_predict(ml_model_fit=ntmle._q_custom_,              # ... predict using custom function
+                                        xdata=np.asarray(d))                        # ... for the extracted data
+
+
+pred_binary, labels, acc = get_accuracy(y_star, pooled_data_restricted_list[-1][ntmle.outcome])
+pred_binary.sum()
+labels.sum()
+labels.numel()
+1-labels.sum()/labels.numel()
+    
+# Ensure all predicted values are bounded properly for continuous
+# SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
+if ntmle._continuous_outcome_list_[-1]:
+    y_star = np.where(y_star < 0., 0. + ntmle._cb_list_[-1], y_star)
+    y_star = np.where(y_star > 1., 1. - ntmle._cb_list_[-1], y_star)     
+
+# if self._continuous_outcome_list_[-1]:
+#     y_star = np.where(y_star < self._continuous_min_list_[-1], self._continuous_min_list_[-1], y_star)
+#     y_star = np.where(y_star > self._continuous_max_list_[-1], self._continuous_max_list_[-1], y_star)
+
+# Updating predictions via intercept from targeting step
+logit_qstar = np.log(probability_to_odds(y_star)) + epsilon                         # NOTE: needs to be logit(Y^*) + e
+q_star = odds_to_probability(np.exp(logit_qstar))                                   # Back converting from odds
+pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star                         # Storing predictions as column
+
+# Taking the mean, grouped-by the pooled sample IDs (fast)
+ntmle.marginals_vector = np.asarray(pooled_data_restricted_list[-1].groupby('_sample_id_')['__pred_q_star__'].mean())
+
+# If continuous outcome, need to unbound the means
+if ntmle._continuous_outcome_list_[-1]:
+    ntmle.marginals_vector = tmle_unit_unbound(ntmle.marginals_vector,                    # Take vector of MC results
+                                                mini=ntmle._continuous_min_list_[-1],      # ... unbound using min
+                                                maxi=ntmle._continuous_max_list_[-1])      # ... and max values
+
+# Calculating estimate for the policy
+ntmle.marginal_outcome = np.mean(ntmle.marginals_vector)                                  # Mean of Monte Carlo results
+ntmle._specified_p_ = p                                                                  # Save what the policy was
+
+# Prep for variance
+if ntmle._continuous_outcome_list_[-1]:                                                  # Continuous needs bounds...
+    y_ = np.array(tmle_unit_unbound(ntmle.df_restricted_list[-1][ntmle.outcome],          # Unbound observed outcomes for Var
+                                    mini=ntmle._continuous_min_list_[-1],                # ... using min
+                                    maxi=ntmle._continuous_max_list_[-1]))               # ... and max values
+    yq0_ = tmle_unit_unbound(ntmle._Qinit_,                                              # Unbound g-comp predictions
+                                mini=ntmle._continuous_min_list_[-1],                       # ... using min
+                                maxi=ntmle._continuous_max_list_[-1])                       # ... and max values
+else:                                                                                   # Otherwise nothing special...
+    y_ = np.array(ntmle.df_restricted_list[-1][ntmle.outcome])                            # Observed outcome for Var
+    yq0_ = ntmle._Qinit_                                                                 # Predicted outcome for Var
+
+print(f'{ntmle.marginal_outcome} - {truth[p]} = {ntmle.marginal_outcome-truth[p]}')
+
+''' Pooled Data
+p=0.7
+
+uniform
+i=0
+q_estimator acc = 0.91
+bias = 0.10550313948472169 - 0.126 = -0.020496860515278312
+DL acc = 0.84
+bias = 0.103775404 - 0.126 = -0.022224595606327058
+
+i=4
+q_estimator acc = 0.82
+bias = 0.173819749295999 - 0.126 = 0.047819749295999
+DL acc = 0.19
+bias = 0.18217044 - 0.126 = 0.05617043578624725
+
+random
+i=0
+q_estimator acc = 0.58
+bias = 0.5226838016094336 - 0.512 = 0.010683801609433607
+DL acc = 0.48
+bias = 0.6852731704711914 - 0.512 = 0.1732731704711914
+
+'''
 ########################################
 # Summarizing results
 ########################################
@@ -313,3 +519,4 @@ print("===========================")
 # Saving results
 ########################################
 results.to_csv("results/" + exposure + str(sim_id) + "_" + save + ".csv", index=False)
+
