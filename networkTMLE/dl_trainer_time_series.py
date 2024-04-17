@@ -17,8 +17,9 @@ import torch.optim as optim
 import numpy as np
 import pandas as pd
 
-from dl_dataset import TimeSeriesDataset, get_dataloaders, get_kfold_split, get_kfold_dataloaders, get_predict_loader
-from dl_models import MLPModelTimeSeries, GCNModelTimeSeries, CNNModelTimeSeries
+# from dl_dataset import TimeSeriesDataset, get_dataloaders, get_kfold_split, get_kfold_dataloaders, get_predict_loader
+from dl_dataset import TimeSeriesDatasetSeparate, TimeSeriesDatasetSeparateNormalize, get_dataloaders, get_kfold_split, get_kfold_dataloaders, get_predict_loader
+from dl_models import MLPModelTimeSeries, GCNModelTimeSeries, CNNModelTimeSeries, MLPModelTimeSeriesNumerical
 
 ######################## ml abstract trainer (Parent) ########################
 class AbstractMLTS:
@@ -33,12 +34,16 @@ class AbstractMLTS:
         self.print_per_time_slice_metrics = False # use to check if all time slices have similar performance
         self.device = device
 
-    def fit(self, df_list, target, use_all_time_slices=True, T_in=10, T_out=10, pos_weight=1, class_weight=None,
+    def fit(self, xy_list, T_in_id=[*range(10)], T_out_id=[*range(10)], pos_weight=1, class_weight=None,
             adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
             n_output=2, _continuous_outcome=False, custom_path=None):
         # initiate weights for class imbalance for loss functions
         self.pos_weight = pos_weight
         self.class_weight = class_weight
+
+        # calculate T_in and T_out for _build_model()
+        self.T_in = len(T_in_id)
+        self.T_out = len(T_out_id)
 
         # initiate best model
         self.best_model = None
@@ -47,7 +52,7 @@ class AbstractMLTS:
         # instantiate model
         self.n_output = n_output
         self._continuous_outcome = _continuous_outcome
-        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T_in, T_out,
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels,
                                        n_output, _continuous_outcome).to(self.device)
         self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
@@ -63,10 +68,13 @@ class AbstractMLTS:
             fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
 
         if self.n_splits > 1: # Kfold cross validation is used
-            splits, dset = self._data_preprocess(df_list, target, use_all_time_slices,
+            splits, dset = self._data_preprocess(xy_list, 
                                                  model_cat_vars=model_cat_vars, 
                                                  model_cont_vars=model_cont_vars, 
-                                                 model_cat_unique_levels=model_cat_unique_levels)
+                                                 model_cat_unique_levels=model_cat_unique_levels,
+                                                 normalize=True,
+                                                 drop_duplicates=False,
+                                                 T_in_id=T_in_id, T_out_id=T_out_id)
             for fold, (train_idx, val_idx) in enumerate(splits.split(np.arange(len(dset)))):
                 print('Fold {}'.format(fold + 1))
                 self.train_loader, self.valid_loader = get_kfold_dataloaders(dset, train_idx, val_idx, 
@@ -119,10 +127,13 @@ class AbstractMLTS:
                 print(f'Performance of {self.n_splits} fold cross validation')
                 print(f'Average Training Loss: {avg_train_loss:.4f} \t Average Val Loss: {avg_val_loss:.4f} \t Average Training Acc: {avg_train_acc:.3f} \t Average Test Acc: {avg_val_acc:.3f}')  
         else:
-            self.train_loader, self.valid_loader, self.test_loader = self._data_preprocess(df_list, target, use_all_time_slices,
+            self.train_loader, self.valid_loader, self.test_loader = self._data_preprocess(xy_list,
                                                                                            model_cat_vars=model_cat_vars, 
                                                                                            model_cont_vars=model_cont_vars, 
-                                                                                           model_cat_unique_levels=model_cat_unique_levels)
+                                                                                           model_cat_unique_levels=model_cat_unique_levels,
+                                                                                           normalize=True,
+                                                                                           drop_duplicates=False,
+                                                                                           T_in_id=T_in_id, T_out_id=T_out_id)
             for epoch in range(self.epochs):
                 print(f'============================= Epoch {epoch + 1}: Training =============================')
                 loss_train, metrics_train = self.train_epoch(epoch)
@@ -143,7 +154,7 @@ class AbstractMLTS:
         else:
             return custom_path
 
-    def predict(self, df_list, target, use_all_time_slices=True, T_in=10, T_out=10, pos_weight=1, class_weight=None, 
+    def predict(self, xy_list, T_in_id=[*range(10)], T_out_id=[*range(10)], pos_weight=1, class_weight=None, 
                 adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
                 n_output=2, _continuous_outcome=False, custom_path=None):
         print(f'============================= Predicting =============================')
@@ -151,26 +162,40 @@ class AbstractMLTS:
         self.pos_weight = pos_weight
         self.class_weight = class_weight 
 
+        # calculate T_in and T_out for _build_model()
+        self.T_in = len(T_in_id)
+        self.T_out = len(T_out_id)
+
         # instantiate model
         self.n_output = n_output
         self._continuous_outcome = _continuous_outcome
 
-        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels, T_in, T_out,  
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels,
                                        n_output, _continuous_outcome).to(self.device)
         self._load_model(custom_path)
         self.criterion = self._loss_fn()
 
         if self.predict_all:
-            dset = TimeSeriesDataset(df_list, target=target, use_all_time_slices=use_all_time_slices,
-                                     model_cat_vars=model_cat_vars, 
-                                     model_cont_vars=model_cont_vars, 
-                                     model_cat_unique_levels=model_cat_unique_levels)
+            dset = TimeSeriesDatasetSeparateNormalize(xy_list,
+                                                      model_cat_vars=model_cat_vars, 
+                                                      model_cont_vars=model_cont_vars, 
+                                                      model_cat_unique_levels=model_cat_unique_levels,
+                                                      normalize=True,
+                                                      drop_duplicates=False,
+                                                      T_in_id=T_in_id, T_out_id=T_out_id)
+            # dset = TimeSeriesDatasetSeparate(xy_list,
+            #                                  model_cat_vars=model_cat_vars, 
+            #                                  model_cont_vars=model_cont_vars, 
+            #                                  model_cat_unique_levels=model_cat_unique_levels)
             self.test_loader = get_predict_loader(dset, self.batch_size)
         else:
-            _, _, self.test_loader = self._data_preprocess(df_list, target, use_all_time_slices=use_all_time_slices,
+            _, _, self.test_loader = self._data_preprocess(xy_list,
                                                            model_cat_vars=model_cat_vars, 
                                                            model_cont_vars=model_cont_vars, 
-                                                           model_cat_unique_levels=model_cat_unique_levels)
+                                                           model_cat_unique_levels=model_cat_unique_levels,
+                                                           normalize=True,
+                                                           drop_duplicates=False,
+                                                           T_in_id=T_in_id, T_out_id=T_out_id)
         
         pred = self.test_epoch(epoch=0, return_pred=True) # pred should probabilities, one for binary
         return pred
@@ -200,17 +225,9 @@ class AbstractMLTS:
             self.optimizer.zero_grad()
 
             # forward + backward + optimize
-            outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T] 
-
-            if self._continuous_outcome:
-                y = y.float().unsqueeze(1) # shape [batch_size, T] -> [batch_size, 1, T] for l1_loss
-            else:
-                if self.n_output == 2: # binary classification
-                    # BCEWithLogitsLoss requires target as float, same size as outputs
-                    y = y.float().unsqueeze(1) # shape [batch_size, T] -> [batch_size, 1, T]
-                else:
-                    # CrossEntropyLoss requires target (class indicies) as int
-                    y = y.long() # shape [batch_size, T]
+            outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T_out] 
+            y = self._reshape_target(y)
+            
             loss = self.criterion(outputs, y)
             loss.backward()
             self.optimizer.step()
@@ -219,9 +236,9 @@ class AbstractMLTS:
             if self.print_per_time_slice_metrics and i % self.print_every == self.print_every - 1:
                 print(f'metrics for batch {i + 1}: train')
                 # metrics_list = []
-                for i in range(x_cat.shape[-1]):
+                for i in range(y.shape[-1]):
                     # metrics_list.append(self._metrics(outputs[:, :, i], y[..., i]))
-                    print(f'time slice {i}')
+                    print(f'time slice {i} / {y.shape[-1]}')
                     print(self._metrics(outputs[:, :, i], y[..., i]))        
                 print()        
 
@@ -275,25 +292,17 @@ class AbstractMLTS:
                 # send to device
                 x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
                 sample_idx = sample_idx.to(self.device)
-                outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T] 
-                if self._continuous_outcome:
-                    y = y.float().unsqueeze(1) # shape [batch_size, T] -> [batch_size, 1, T] for l1_loss
-                else:
-                    if self.n_output == 2: # binary classification
-                        # BCEWithLogitsLoss requires target as float, same size as outputs
-                        y = y.float().unsqueeze(1) # shape [batch_size, T] -> [batch_size, 1, T] 
-                    else:
-                        # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-                        y = y.long() # shape [batch_size, T] 
+                outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T_out] 
+                y = self._reshape_target(y)
                 loss = self.criterion(outputs, y)
 
                 # metrics
                 if self.print_per_time_slice_metrics and i == len(self.valid_loader) - 1:
                     print(f'metrics for batch {i + 1}: validation')
                     # metrics_list = []
-                    for i in range(x_cat.shape[-1]):
+                    for i in range(y.shape[-1]):
                         # metrics_list.append(self._metrics(outputs[:, :, i], y[..., i]))
-                        print(f'time slice {i}')
+                        print(f'time slice {i} / {y.shape[-1]}')
                         print(self._metrics(outputs[:, :, i], y[..., i]))        
                     print()        
 
@@ -341,7 +350,8 @@ class AbstractMLTS:
                 # send to device
                 x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
                 sample_idx = sample_idx.to(self.device) 
-                outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T] 
+                outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T_out] 
+                
                 if return_pred:
                     if self._continuous_outcome:
                         pred_list.append(outputs.detach().to('cpu').numpy())
@@ -351,24 +361,16 @@ class AbstractMLTS:
                         else:
                             pred_list.append(torch.softmax(outputs, dim=1).detach().to('cpu').numpy())
                 
-                if self._continuous_outcome:
-                    y = y.float().unsqueeze(1) # shape [batch_size, T] -> [batch_size, 1, T] for l1_loss
-                else:
-                    if self.n_output == 2: # binary classification
-                        # BCEWithLogitsLoss requires target as float, same size as outputs
-                        y = y.float().unsqueeze(1) # shape [batch_size, T] -> [batch_size, 1, T]
-                    else:
-                        # CrossEntropyLoss requires target (class indicies) as int, shape [batch_size]
-                        y = y.long() # shape [batch_size, T]
+                y = self._reshape_target(y)
                 loss = self.criterion(outputs, y)
 
                 # metrics
                 if self.print_per_time_slice_metrics and i == len(self.test_loader) - 1:
                     print(f'metrics for batch {i + 1}: test')
                     # metrics_list = []
-                    for i in range(x_cat.shape[-1]):
+                    for i in range(y.shape[-1]):
                         # metrics_list.append(self._metrics(outputs[:, :, i], y[..., i]))
-                        print(f'time slice {i}')
+                        print(f'time slice {i} / {y.shape[-1]}')
                         print(self._metrics(outputs[:, :, i], y[..., i]))        
                     print()        
 
@@ -413,12 +415,19 @@ class AbstractMLTS:
     def _build_model(self):
         pass 
 
-    def _data_preprocess(self, df, target=None, use_all_time_slices=True,
-                         model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
-        ts_dset = TimeSeriesDataset(df, target=target, use_all_time_slices=use_all_time_slices,
-                                    model_cat_vars=model_cat_vars, 
-                                    model_cont_vars=model_cont_vars, 
-                                    model_cat_unique_levels=model_cat_unique_levels)
+    def _data_preprocess(self, xy_list, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={},
+                        normalize=True, drop_duplicates=True, T_in_id=[*range(10)], T_out_id=[*range(10)]):
+        # ts_dset = TimeSeriesDatasetSeparate(xy_list=xy_list,
+        #                                     model_cat_vars=model_cat_vars, 
+        #                                     model_cont_vars=model_cont_vars, 
+        #                                     model_cat_unique_levels=model_cat_unique_levels)
+        ts_dset = TimeSeriesDatasetSeparateNormalize(xy_list=xy_list,
+                                                     model_cat_vars=model_cat_vars, 
+                                                     model_cont_vars=model_cont_vars, 
+                                                     model_cat_unique_levels=model_cat_unique_levels,
+                                                     normalize=normalize,
+                                                     drop_duplicates=drop_duplicates,
+                                                     T_in_id=T_in_id, T_out_id=T_out_id)
 
         if self.n_splits > 1: # Kfold cross validation is used
             return get_kfold_split(n_splits=self.n_splits, shuffle=self.shuffle), ts_dset
@@ -433,6 +442,27 @@ class AbstractMLTS:
     def _optimizer(self):
         return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         # return optim.Adam(self.model.parameters(), lr=0.001)
+    
+    def _reshape_target(self, y):
+        if self._continuous_outcome:
+                if y.dim() == 2:
+                    y = y.float().unsqueeze(1) # shape [batch_size, T_out] -> [batch_size, 1, T_out] for l1_loss
+                elif y.dim() == 1:
+                    y = y.float().unsqueeze(-1).unsqueeze(-1) # shape [batch_size] -> [batch_size, 1, 1] for l1_loss
+        else:
+            if self.n_output == 2: # binary classification
+                # BCEWithLogitsLoss requires target as float, same size as outputs
+                if y.dim() == 2:
+                    y = y.float().unsqueeze(1) # shape [batch_size, T_out] -> [batch_size, 1, T_out]
+                elif y.dim() == 1:
+                    y = y.float().unsqueeze(-1).unsqueeze(-1) # shape [batch_size] -> [batch_size, 1, 1]
+            else:
+                # CrossEntropyLoss requires target (class indicies) as int
+                if y.dim() == 2:
+                    y = y.long() # shape [batch_size, T_out]
+                elif y.dim() == 1:
+                    y = y.long().unsqueeze(-1) # shape [batch_size] -> [batch_size, 1]
+        return y
 
     def _loss_fn(self):
         if self._continuous_outcome:
@@ -524,26 +554,29 @@ class AbstractMLTS:
 ######################## MLP model trainer (Child) ########################
 class MLPTS(AbstractMLTS):
     def __init__(self, split_ratio, batch_size, shuffle, n_splits, predict_all,
-                 epochs, print_every, device='cpu', save_path='./'):
+                 epochs, print_every, device='cpu', save_path='./',
+                 lin_hidden=None, lin_hidden_temporal=None):
         super(MLPTS, self).__init__(split_ratio, batch_size, shuffle, n_splits, predict_all,
                          epochs, print_every, device, save_path)
+        self.lin_hidden = lin_hidden
+        self.lin_hidden_temporal = lin_hidden_temporal
     
     def _optimizer(self):
         # return optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9)
         return optim.Adam(self.model.parameters(), lr=0.0001)
 
-    def _build_model(self, adj_matrix_list, 
-                    model_cat_vars, model_cont_vars, model_cat_unique_levels, T_in, T_out,
+    def _build_model(self, adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels,
                     n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
-        net = MLPModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T_in, T_out,
-                                 n_output, _continuous_outcome)
+        # net = MLPModelTimeSeries(adj_matrix_list, model_cat_unique_levels, n_cont, T_in, T_out,
+        #                          n_output, _continuous_outcome)
+        net = MLPModelTimeSeriesNumerical(adj_matrix_list, model_cat_unique_levels, n_cont, self.T_in, self.T_out,
+                                          n_output, _continuous_outcome, self.lin_hidden, self.lin_hidden_temporal)
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             net = nn.DataParallel(net)
             net = net.to(self.device)
         return net
-
 
 ######################## GCN model trainer (Child) ########################
 class GCNTS(AbstractMLTS):

@@ -83,6 +83,132 @@ class TimeSeriesDataset(Dataset):
     def __len__(self):
         return self.data_array.shape[0]
 
+class TimeSeriesDatasetSeparate(Dataset):
+    def __init__(self, xy_list, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}):
+        ''' Retrieve train, label and pred data from list of pd.Dataframe (input) and list of np.array (label) directly
+        Args:  
+            xy_list: list, containing pd.DataFrame data and np.array label, PS, len(xdata_list) does not necassarily equal to len(ydata_list)
+            model_cat_vars: list, categorical variables in patsy_matrix_dataframe, subset of cat_vars
+            model_cont_vars: list, continuous variables in patsy_matrix_dataframe, subset of cont_vars
+            model_cat_unique_levels: dict, number of unique levels for each categorical variable of patsy_matrix_dataframe, subset of cat_unique_levels
+        '''
+        xdata_list, ydata_list = xy_list
+
+        # use numerical index to avoid looping inside _getitem_()
+        self.cat_col_index = self._column_name_to_index(xdata_list[-1], model_cat_vars)
+        self.cont_col_index = self._column_name_to_index(xdata_list[-1], model_cont_vars)
+
+        self.input_data_array = np.stack([df.to_numpy() for df in xdata_list], axis=-1) 
+        # len(xdata_list) = T_in
+        # self.input_data_array: [num_samples, num_features, T_in]
+        self.label_data_array = np.stack(ydata_list, axis=-1)
+        # len(ydata_list) = T_out
+        # self.label_data_array: [num_samples, T_out]
+
+    def _column_name_to_index(self, dataframe, column_name):
+        return dataframe.columns.get_indexer(column_name)
+
+    def __getitem__(self, idx):
+        cat_vars = torch.from_numpy(self.input_data_array[idx, self.cat_col_index, :]).int() # [num_cat_vars, T_in]
+        cont_vars = torch.from_numpy(self.input_data_array[idx, self.cont_col_index, :]).float() # [num_cont_vars, T_in]
+        labels = torch.from_numpy(self.label_data_array[idx, :]).float().squeeze(0) # [1, T_out] -> [T_out]
+        
+        return cat_vars, cont_vars, labels, idx # idx shape []
+
+    def __len__(self):
+        return self.input_data_array.shape[0] # num_samples
+
+class TimeSeriesDatasetSeparateNormalize(Dataset):
+    def __init__(self, xy_list, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={},
+                 normalize=True, drop_duplicates=True, T_in_id=[*range(10)], T_out_id=[*range(10)]):
+        ''' Retrieve train, label and pred data from list of pd.Dataframe (input) and list of np.array (label) directly,
+            Treat categorical variables as numerical float, apply normalization to them and drop duplicates in the dataset
+        Args:  
+            xy_list: list, containing pd.DataFrame data and np.array label, PS, len(xdata_list) does not necassarily equal to len(ydata_list)
+            model_cat_vars: list, categorical variables in patsy_matrix_dataframe, subset of cat_vars
+            model_cont_vars: list, continuous variables in patsy_matrix_dataframe, subset of cont_vars
+            model_cat_unique_levels: dict, number of unique levels for each categorical variable of patsy_matrix_dataframe, subset of cat_unique_levels
+            normalize: normalize the dataframe, treat every column as numerical float
+            drop_duplicates: drop duplicates in the dataset, save only the minimum of data
+            T_in_id: list
+                list of index showing the time slice used for the input data
+            T_out_id: list
+                list of index showing the time slice used for the outcome data
+        '''
+        xdata_list, ydata_list = xy_list
+
+        xdata_list_reduce = []
+        ydata_list_reduce = []
+        if drop_duplicates:
+            sample_size = []
+            for i in T_in_id:
+                # map to index after slicing
+                x_id = T_in_id.index(i)
+                check_duplicates = xdata_list[x_id].duplicated()
+                if check_duplicates.sum() > 0:
+                    xdata_list_reduce.append(xdata_list[x_id].drop_duplicates())
+                    if i in T_out_id:
+                        y_id = T_out_id.index(i)
+                        ydata_list_reduce.append(ydata_list[y_id][~check_duplicates])
+                    sample_size.append(xdata_list_reduce[x_id].shape[0])
+                else:
+                    xdata_list_reduce.append(xdata_list[x_id])
+                    if i in T_out_id:
+                        y_id = T_out_id.index(i) 
+                        ydata_list_reduce.append(ydata_list[y_id])
+                    sample_size.append(xdata_list_reduce[x_id].shape[0])
+            # select the minimum sample size after dropping duplicates
+            xdata_list_reduce = [xdata_list_reduce[i][:min(sample_size)] for i in range(len(xdata_list_reduce))]
+            ydata_list_reduce = [ydata_list_reduce[i][:min(sample_size)] for i in range(len(ydata_list_reduce))]
+            print(f'sample sizes: {sample_size}')
+
+        if normalize:
+            if drop_duplicates:
+                xdata_list_norm = [self._normlize_dataframe(df) for df in xdata_list_reduce]
+            else:
+                xdata_list_norm = [self._normlize_dataframe(df) for df in xdata_list]
+
+        # use numerical index to avoid looping inside _getitem_()
+        self.cat_col_index = self._column_name_to_index(xdata_list[-1], model_cat_vars)
+        self.cont_col_index = self._column_name_to_index(xdata_list[-1], model_cont_vars)
+
+        if drop_duplicates and normalize:
+            self.input_data_array = np.stack([df.to_numpy() for df in xdata_list_norm], axis=-1) 
+            self.label_data_array = np.stack(ydata_list_reduce, axis=-1)
+        elif drop_duplicates:
+            self.input_data_array = np.stack([df.to_numpy() for df in xdata_list_reduce], axis=-1) 
+            self.label_data_array = np.stack(ydata_list_reduce, axis=-1)
+        elif normalize:
+            self.input_data_array = np.stack([df.to_numpy() for df in xdata_list_norm], axis=-1) 
+            self.label_data_array = np.stack(ydata_list, axis=-1)
+        else:
+            self.input_data_array = np.stack([df.to_numpy() for df in xdata_list], axis=-1) 
+            # len(xdata_list) = T_in
+            # self.input_data_array: [num_samples, num_features, T_in]
+            self.label_data_array = np.stack(ydata_list, axis=-1)
+            # len(ydata_list) = T_out
+            # self.label_data_array: [num_samples, T_out]
+    
+    def _normlize_dataframe(self, dataframe, method='zscore'):
+        if method == 'zscore':
+            return (dataframe - dataframe.mean())/dataframe.std()
+        elif method == 'minmax':
+            return (dataframe - dataframe.min())/(dataframe.max() - dataframe.min())
+
+    def _column_name_to_index(self, dataframe, column_name):
+        return dataframe.columns.get_indexer(column_name)
+
+    def __getitem__(self, idx):
+        cat_vars = torch.from_numpy(self.input_data_array[idx, self.cat_col_index, :]).float() # [num_cat_vars, T_in]
+        cont_vars = torch.from_numpy(self.input_data_array[idx, self.cont_col_index, :]).float() # [num_cont_vars, T_in]
+        labels = torch.from_numpy(self.label_data_array[idx, :]).float().squeeze(0) # [1, T_out] -> [T_out]
+        
+        return cat_vars, cont_vars, labels, idx # idx shape []
+
+    def __len__(self):
+        return self.input_data_array.shape[0] # num_samples
+
+
 ######################## split dataset and define loader ########################
 def get_dataloaders(dataset, split_ratio=[0.7, 0.1, 0.2], batch_size=16, shuffle=True):
     torch.manual_seed(17) # random split with reproducibility

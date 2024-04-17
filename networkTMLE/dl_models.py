@@ -210,6 +210,73 @@ class MLPModelTimeSeries(nn.Module):
     
         return x
 
+class MLPModelTimeSeriesNumerical(nn.Module):
+    def __init__(self, adj_matrix_list, model_cat_unique_levels, n_cont, T_in=10, T_out=10,
+                 n_output=2, _continuous_outcome=False, lin_hidden=None, lin_hidden_temporal=None):
+        super(MLPModelTimeSeriesNumerical, self).__init__()
+        # feature dim
+        self.lin_input = nn.Linear(7, 32)
+        if lin_hidden is not None:
+            self.lin_hidden = lin_hidden
+        else:
+            self.lin_hidden = nn.ModuleList([nn.Linear(32, 128), nn.Linear(128, 512), 
+                                            nn.Linear(512, 128), nn.Linear(128, 32)])
+        if n_output == 2 or _continuous_outcome:
+            self.lin_output = nn.Linear(32, 1) 
+        else:
+            self.lin_output = nn.Linear(32, n_output)
+        
+        # temporal dim
+        if T_in > 1: # T_in > 1 and T_out >= 1
+            self.lin_input_temporal = nn.Linear(T_in, 128)
+            self.lin_output_temporal = nn.Linear(128, T_out)
+            if lin_hidden_temporal is not None:
+                self.lin_hidden_temporal = lin_hidden_temporal
+            else:
+                self.lin_hidden_temporal = None
+        else: # T_in = 1 and T_out = 1
+            self.lin_input_temporal = None
+            self.lin_output_temporal = None
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.Embedding):
+                nn.init.uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0) 
+
+    def forward(self, x_cat, x_cont, batched_nodes_indices=None):
+        # x_cat: [batch_size, num_cat_vars, T_in]
+        # x_cont: [batch_size, num_cont_vars, T_in]
+        # batched_nodex_indices: [batch_size]
+
+        x1, x2 = x_cat.permute(0, 2, 1), x_cont.permute(0, 2, 1) 
+        x =  torch.cat([x1, x2], -1) # -> [batch_size, T_in, num_cat_vars + num_cont_vars]
+
+        x = F.relu(self.lin_input(x))
+        for layer in self.lin_hidden:
+            x = F.relu(layer(x))
+        x = self.lin_output(x) # -> [batch_size, T_in, 1]
+
+        if self.lin_input_temporal is not None:
+            x = F.relu(self.lin_input_temporal(x.permute(0, 2, 1))) # -> [batch_size, 1, 128]
+            if self.lin_hidden_temporal is not None:
+                for layer in self.lin_hidden_temporal:
+                    x = F.relu(layer(x))
+            x = self.lin_output_temporal(x) # -> [batch_size, 1, T_out]
+            return x
+        else:
+            return x.permute(0, 2, 1) # -> [batch_size, 1, 1]
+
+
 ######################## GCN model ########################
 class GCNLayer(nn.Module):
     def __init__(self, in_channels, out_channels):

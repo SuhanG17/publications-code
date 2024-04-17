@@ -433,7 +433,8 @@ class NetworkTMLETimeSeries:
             # TODO this should have some error-checking
             self._gs_custom_sim_ = custom_model_sim             # ... store alternative model
 
-    def outcome_model(self, model, custom_model=None, distribution='normal'):
+    def outcome_model(self, model, custom_model=None, distribution='normal', 
+                      T_in_id=[*range(10)], T_out_id=[*range(10)]):
         """Estimation of the outcome model E(Y|A, A_map, W, W_map).
 
         Note
@@ -495,7 +496,7 @@ class NetworkTMLETimeSeries:
                 custom_path = 'outcome_' + self.outcome + '.pth'
                 self._q_custom_ = custom_model
                 self._q_custom_path_, self._Qinit_ = outcome_deep_learner_ts(custom_model, 
-                                                                             xdata_list, ydata_list, self.outcome, self.use_all_time_slices,
+                                                                             xdata_list, ydata_list, T_in_id, T_out_id,
                                                                              self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
                                                                              predict_with_best=False, custom_path=custom_path)
             else:
@@ -545,7 +546,8 @@ class NetworkTMLETimeSeries:
         #                             self._Qinit_)                                           # ... otherwise keep
 
     def fit(self, p, samples=100, bound=None, seed=None,
-            shift=False, mode='top', percent_candidates=0.3):
+            shift=False, mode='top', percent_candidates=0.3,
+            T_in_id=[*range(10)], T_out_id=[*range(10)]):
         """Estimation procedure under a specified treatment plan.
 
         This function estimates the IPTW for the treatment plan of interest, performs the target steps, and
@@ -598,10 +600,11 @@ class NetworkTMLETimeSeries:
         h_iptw, pooled_data_restricted_list, pooled_adj_matrix_list = self._estimate_iptw_ts_(p=p,                      # Generate pooled & estiamte weights
                                                                                               samples=samples,           # ... for some number of samples
                                                                                               bound=bound,               # ... with applied probability bounds
-                                                                                              seed=seed,
+                                                                                              seed=seed,                 # ... and with a random seed given
                                                                                               shift=shift,
                                                                                               mode=mode,
-                                                                                              percent_candidates=percent_candidates)                 # ... and with a random seed given
+                                                                                              percent_candidates=percent_candidates,
+                                                                                              T_in_id=T_in_id, T_out_id=T_out_id)                 
 
         # Saving some information for diagnostic procedures
         if self._gs_measure_ is None:                                  # If no summary measure, use the A_sum
@@ -638,7 +641,7 @@ class NetworkTMLETimeSeries:
                     n_output_list.append(pd.unique(pooled_data_restricted[self.outcome]).shape[0])
 
                 y_star = outcome_deep_learner_ts(self._q_custom_, 
-                                                 xdata_list, ydata_list, self.outcome, self.use_all_time_slices,
+                                                 xdata_list, ydata_list, T_in_id, T_out_id,
                                                  pooled_adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
                                                  predict_with_best=True, custom_path=self._q_custom_path_)
             else:
@@ -963,7 +966,7 @@ class NetworkTMLETimeSeries:
                                labels=[labels],             # ... with the specified labels
                                verbose=True)                # ... warns user if NaN's are being generated
 
-    def _estimate_iptw_ts_(self, p, samples, bound, seed, shift, mode, percent_candidates):
+    def _estimate_iptw_ts_(self, p, samples, bound, seed, shift, mode, percent_candidates, T_in_id, T_out_id):
         """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
         of Causal Inference 2017
 
@@ -1010,6 +1013,8 @@ class NetworkTMLETimeSeries:
             self._denominator_ = self._estimate_exposure_nuisance_ts_(data_to_fit_list=self.df_restricted_list.copy(),
                                                                       data_to_predict_list=self.df_restricted_list.copy(),
                                                                       adj_matrix_list=self.adj_matrix_list.copy(),
+                                                                      T_in_id=T_in_id, 
+                                                                      T_out_id=T_out_id,
                                                                       distribution=self._map_dist_,
                                                                       verbose_label='Weight - Denominator',
                                                                       store_model=True,
@@ -1047,7 +1052,7 @@ class NetworkTMLETimeSeries:
 
             # ensure pooled data contains all exposure levels in observed data``
             if self.use_deep_learner_A_i_s:
-                regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, df_restricted)
+                regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted_list[time_step])
                 print(f'before while loop regenerate_flag: {regenerate_flag}')
                 while regenerate_flag:
                     print(f'regenerating pooled sample for {self._gs_measure_}')
@@ -1063,7 +1068,7 @@ class NetworkTMLETimeSeries:
                     samples_max_degree_list_ = updated_max_degree_list
                      
                     pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()              # Restricting pooled sample
-                    regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, df_restricted)
+                    regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted_list[time_step])
                     print(f'in while loop regenerate_flag: {regenerate_flag}')
                     print()
             pooled_data_restricted_list.append(pooled_data_restricted)
@@ -1075,6 +1080,8 @@ class NetworkTMLETimeSeries:
         numerator = self._estimate_exposure_nuisance_ts_(data_to_fit_list=pooled_data_restricted_list.copy(),
                                                          data_to_predict_list=self.df_restricted_list.copy(),
                                                          adj_matrix_list=pooled_adj_matrix_list,
+                                                         T_in_id=T_in_id,
+                                                         T_out_id=T_out_id,
                                                          distribution=self._map_dist_,
                                                          verbose_label='Weight - Numerator',
                                                          store_model=False,
@@ -1456,7 +1463,7 @@ class NetworkTMLETimeSeries:
     #     # Returning the pooled data set
     #     return pd.concat(pooled_sample, axis=0, ignore_index=True)
 
-    def _estimate_exposure_nuisance_ts_(self, data_to_fit_list, data_to_predict_list, adj_matrix_list,
+    def _estimate_exposure_nuisance_ts_(self, data_to_fit_list, data_to_predict_list, adj_matrix_list, T_in_id, T_out_id,
                                         distribution, verbose_label, store_model, 
                                         custom_path_prefix=None, **kwargs):
         """Unified function to estimate the numerator and denominator of the weights.
@@ -1531,7 +1538,8 @@ class NetworkTMLETimeSeries:
                 # print(f'n_output_list: {n_output_list}')
                 custom_path = custom_path_prefix + 'A_i_' + self.exposure  + '.pth' 
                 pred = exposure_deep_learner_ts(self._gi_custom_,
-                                                xdata_list, ydata_list, pdata_list, pdata_y_list, self.exposure, self.use_all_time_slices,
+                                                xdata_list, ydata_list, pdata_list, pdata_y_list, 
+                                                T_in_id, T_out_id,
                                                 adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
                                                 custom_path, **kwargs)
             else:
@@ -1652,7 +1660,7 @@ class NetworkTMLETimeSeries:
 
                     custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
                     pred = exposure_deep_learner_ts(self._gs_custom_,
-                                                    xdata_list, ydata_list, pdata_list, pdata_y_list, self._gs_measure_, self.use_all_time_slices,
+                                                    xdata_list, ydata_list, pdata_list, pdata_y_list, T_in_id, T_out_id,
                                                     adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
                                                     custom_path, **kwargs)
                 else:
@@ -1744,7 +1752,7 @@ class NetworkTMLETimeSeries:
 
                     custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
                     pred = exposure_deep_learner_ts(self._gs_custom_,
-                                                    xdata_list, ydata_list, pdata_list, pdata_y_list, self._gs_measure_, self.use_all_time_slices,
+                                                    xdata_list, ydata_list, pdata_list, pdata_y_list, T_in_id, T_out_id,
                                                     adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
                                                     custom_path, **kwargs)
                 else:
