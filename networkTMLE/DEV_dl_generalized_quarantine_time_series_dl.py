@@ -1,4 +1,5 @@
 # from sys import argv
+import argparse
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -16,6 +17,7 @@ from beowulf.dgm import quarantine_dgm_time_series
 from beowulf.dgm.utils import network_to_df
 
 import torch
+import torch.nn as nn
 from dl_trainer_time_series import MLPTS, GCNTS, CNNTS
 
 ############################################
@@ -30,9 +32,16 @@ outcome = "D"
 ########################################
 # Running through logic from .sh script
 ########################################
+parser = argparse.ArgumentParser(description='DLnetworkTMLE')
+parser.add_argument('--task_string', type=str, required=True, default='10010',
+                        help='the slurm_setup id in string format')
+args = parser.parse_args()
+
 # script_name, slurm_setup = argv
 # script_name, slurm_setup = 'some_script', '10010'  
-script_name, slurm_setup = 'some_script', '20040'  
+script_name = 'some_script'
+slurm_setup = args.task_string
+
 network, n_nodes, degree_restrict, shift, model, save = simulation_setup(slurm_id_str=slurm_setup)
 sim_id = slurm_setup[4]
 seed_number = 18900567 + 10000000*int(sim_id)
@@ -234,7 +243,9 @@ for i in range(n_mc):
         '''Return deep learner model based on the type of deep learner'''
         if deep_learner_type == 'mlp':
             deep_learner = MLPTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=1, predict_all=True,
-                                epochs=25, print_every=5, device=device, save_path='./tmp.pth')
+                                epochs=25, print_every=5, device=device, save_path='./tmp.pth',
+                                lin_hidden=None,
+                                lin_hidden_temporal=nn.ModuleList([nn.Linear(128, 256), nn.Linear(256, 128)]))
         elif deep_learner_type == 'gcn':
             deep_learner = GCNTS(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=5, predict_all=True,
                                     epochs=10, print_every=5, device=device, save_path='./tmp.pth')
@@ -273,17 +284,19 @@ for i in range(n_mc):
     if q_estimator is not None:
         ntmle.outcome_model(qn_model, custom_model=q_estimator) 
     else:
-        ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome, T_in_id=[9], T_out_id=[9])
+        ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome, T_in_id=[6, 7, 8, 9], T_out_id=[9])
 
     for p in prop_treated:  # loops through all treatment plans
         try:
             if shift:
                 z = odds_to_probability(np.exp(log_odds + p))
                 ntmle.fit(p=z, bound=0.01, seed=seed_number+i, 
-                            shift=shift, mode=mode, percent_candidates=percent_candidates)
+                          shift=shift, mode=mode, percent_candidates=percent_candidates,
+                          T_in_id=[6, 7, 8, 9], T_out_id=[9])
             else:
                 ntmle.fit(p=p, bound=0.01, seed=seed_number+i,
-                            shift=shift, mode=mode, percent_candidates=percent_candidates)
+                          shift=shift, mode=mode, percent_candidates=percent_candidates,
+                          T_in_id=[6, 7, 8, 9], T_out_id=[9])
             results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
             results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
             results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
@@ -306,6 +319,7 @@ for i in range(n_mc):
 ########################################
 print("RESULTS\n")
 
+avg_over_sims={'prop_treated':[], 'bias':[], 'ese':[], 'cover':[], 'coverl':[]}
 for p in prop_treated:
     # Confidence Interval Coverage
     results['cover_'+str(p)] = np.where((results['lcl_'+str(p)] < truth[p]) &
@@ -326,9 +340,18 @@ for p in prop_treated:
     if not independent:
         print("Cover-Latent:", np.mean(results['coverl_' + str(p)]))
 
+    avg_over_sims['prop_treated'].append(p)
+    avg_over_sims['bias'].append(np.mean(results['bias_'+str(p)]))
+    avg_over_sims['ese'].append(np.std(results['bias_'+str(p)], ddof=1))
+    avg_over_sims['cover'].append(np.mean(results['cover_'+str(p)]))
+    if not independent:
+        avg_over_sims['coverl'].append(np.mean(results['coverl_' + str(p)]))
+
 print("===========================")
+avg_df = pd.DataFrame.from_dict(avg_over_sims, orient='index')
+avg_df.to_csv("avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_DL_" + ".csv", index=False)
 
 ########################################
 # Saving results
 ########################################
-results.to_csv("results/" + exposure + str(sim_id) + "_" + save + ".csv", index=False)
+results.to_csv("results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  ".csv", index=False)

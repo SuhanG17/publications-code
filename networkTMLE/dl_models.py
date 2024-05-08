@@ -214,8 +214,10 @@ class MLPModelTimeSeriesNumerical(nn.Module):
     def __init__(self, adj_matrix_list, model_cat_unique_levels, n_cont, T_in=10, T_out=10,
                  n_output=2, _continuous_outcome=False, lin_hidden=None, lin_hidden_temporal=None):
         super(MLPModelTimeSeriesNumerical, self).__init__()
+        n_cat = len(model_cat_unique_levels)
+        n_input = n_cat + n_cont
         # feature dim
-        self.lin_input = nn.Linear(7, 32)
+        self.lin_input = nn.Linear(n_input, 32)
         if lin_hidden is not None:
             self.lin_hidden = lin_hidden
         else:
