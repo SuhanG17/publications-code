@@ -8,3 +8,4 @@
 *.log
 *.pid
 results/
+avg_sims_results/
