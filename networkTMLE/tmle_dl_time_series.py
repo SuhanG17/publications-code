@@ -138,8 +138,11 @@ class NetworkTMLETimeSeries:
     """
     def __init__(self, network_list, exposure, outcome, degree_restrict=None, alpha=0.05,
                  continuous_bound=0.0005, verbose=False,
+                 task_string='00000',
                  cat_vars=[], cont_vars=[], cat_unique_levels={},
                  use_deep_learner_A_i=False, use_deep_learner_A_i_s=False, use_deep_learner_outcome=False, use_all_time_slices=True):
+        # initiate task_string to save model under the right name
+        self.task_string = task_string
         # initiate cat_vars, cont_vars and cat_unique_levels (SG_modified)
         self.cat_vars, self.cont_vars, self.cat_unique_levels = cat_vars, cont_vars, cat_unique_levels
 
@@ -493,7 +496,8 @@ class NetworkTMLETimeSeries:
                     ydata_list.append(df_restricted[self.outcome])
                     n_output_list.append(pd.unique(df_restricted[self.outcome]).shape[0])
 
-                custom_path = 'outcome_' + self.outcome + '.pth'
+                # custom_path = 'outcome_' + self.outcome + '.pth'
+                custom_path = 'outcome_' + self.outcome + '_' + self.task_string + '.pth'
                 self._q_custom_ = custom_model
                 self._q_custom_path_, self._Qinit_ = outcome_deep_learner_ts(custom_model, 
                                                                              xdata_list, ydata_list, T_in_id, T_out_id,
@@ -1536,7 +1540,7 @@ class NetworkTMLETimeSeries:
                     pdata_y_list.append(d2p[self.exposure])
                 
                 # print(f'n_output_list: {n_output_list}')
-                custom_path = custom_path_prefix + 'A_i_' + self.exposure  + '.pth' 
+                custom_path = custom_path_prefix + 'A_i_' + self.exposure  + '_' + self.task_string + '.pth' 
                 pred = exposure_deep_learner_ts(self._gi_custom_,
                                                 xdata_list, ydata_list, pdata_list, pdata_y_list, 
                                                 T_in_id, T_out_id,
@@ -1658,7 +1662,7 @@ class NetworkTMLETimeSeries:
                         print(f'T_slice: {i} | gs_model | n_output : {n_output_list[i]} | target variables: {self._gs_measure_}')
                         
 
-                    custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
+                    custom_path = custom_path_prefix + 'A_i_s_' + self.exposure + '_' + self.task_string + '.pth'
                     pred = exposure_deep_learner_ts(self._gs_custom_,
                                                     xdata_list, ydata_list, pdata_list, pdata_y_list, T_in_id, T_out_id,
                                                     adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,
@@ -1750,7 +1754,7 @@ class NetworkTMLETimeSeries:
                         pdata_list.append(patsy.dmatrix(self._gs_model + ' - 1', d2p, return_type="dataframe"))
                         pdata_y_list.append(d2p[self._gs_measure_])
 
-                    custom_path = custom_path_prefix + 'A_i_s_' + self.exposure  + '.pth'
+                    custom_path = custom_path_prefix + 'A_i_s_' + self.exposure + '_' + self.task_string + '.pth'
                     pred = exposure_deep_learner_ts(self._gs_custom_,
                                                     xdata_list, ydata_list, pdata_list, pdata_y_list, T_in_id, T_out_id,
                                                     adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list,

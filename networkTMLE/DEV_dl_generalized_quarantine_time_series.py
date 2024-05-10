@@ -204,6 +204,7 @@ for i in range(n_mc):
     # Network TMLE
     # use deep learner for given nuisance model
     ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict,
+                                  task_string=args.task_string,
                                     cat_vars=cat_vars_i, cont_vars=cont_vars_i, cat_unique_levels=cat_unique_levels_i,
                                     use_deep_learner_A_i=use_deep_learner_A_i, 
                                     use_deep_learner_A_i_s=use_deep_learner_A_i_s, 
