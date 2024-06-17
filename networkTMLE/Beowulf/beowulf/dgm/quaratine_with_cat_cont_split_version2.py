@@ -9,7 +9,7 @@ from beowulf.dgm.utils import (network_to_df, fast_exp_map, exposure_restriction
                                odds_to_probability, probability_to_odds)
 # from utils import (network_to_df, fast_exp_map, exposure_restrictions,
 #                                odds_to_probability, probability_to_odds)
-# import time
+
 
 ################ social distancing ####################
 def get_removed_edges(data, graph, social_distancing, p_remove_connection=0.1, rng_generator=None):
@@ -291,13 +291,8 @@ def update_summary_measures(data, graph):
     data['I_ratio'] = data['I_ratio'].fillna(0)  # fill in 0 for nodes with no neighbors
 
     # add I_ratio to graph data
-    if nx.is_directed(graph):
-        raise NotImplementedError("Directed graph is not supported yet")
-    else:
-        nx.set_node_attributes(graph, dict(data['I_ratio']), 'I_ratio')
-    # # for-loop version
-    # for n in graph.nodes():
-    #     graph.nodes[n]['I_ratio'] = float(data.loc[data.index == n, 'I_ratio'].values)
+    for n in graph.nodes():
+        graph.nodes[n]['I_ratio'] = float(data.loc[data.index == n, 'I_ratio'].values)
     
     return data, graph
     
@@ -321,18 +316,12 @@ def update_pr_a(data, graph, restricted, edge_recorder, time_step, rng):
         # quarantine = data['quarantine'].to_numpy() # update quarantine    
 
     # apply quarantine to all selected nodes: remove immediate neighbors for the next time step
-    # Function version
-    if nx.is_directed(graph):
-        raise NotImplementedError("Directed graph is not supported yet")
-    else:
-        nx.set_node_attributes(graph, dict(data['quarantine']), 'quarantine')
-        edge_recorder[time_step] = list(nx.edges(graph, data[data['quarantine']==1].index))
-    # # for-loop version
-    # for n in graph.nodes():
-    #     graph.nodes[n]['quarantine'] = int(data.loc[data.index == n, 'quarantine'].values)
-    #     if n in data[data['quarantine']==1].index: # remove all immediate neighbors
-    #         for neighbor in graph.neighbors(n):
-    #             edge_recorder[time_step].append((neighbor, n))
+    for n in graph.nodes():
+        graph.nodes[n]['quarantine'] = int(data.loc[data.index == n, 'quarantine'].values)
+        if n in data[data['quarantine']==1].index: # remove all immediate neighbors
+            for neighbor in graph.neighbors(n):
+                edge_recorder[time_step].append((neighbor, n))
+    
     return data, graph, edge_recorder
 
 def update_edge_in_graph(graph, edge_recorder, time_step, quarantine_period):
@@ -499,133 +488,14 @@ def apply_quarantine_action(data, graph, shift, restricted, edge_recorder, time_
         # quarantine = data['quarantine'].to_numpy() # update quarantine
     
     # apply quarantine to all selected nodes: remove immediate neighbors for the next time step
-    # Function version
-    if nx.is_directed(graph):
-        raise NotImplementedError("Directed graph is not supported yet")
-    else:
-        nx.set_node_attributes(graph, dict(data['quarantine']), 'quarantine')
-        edge_recorder[time_step] = list(nx.edges(graph, data[data['quarantine']==1].index))
-    # # for-loop version
-    # for n in graph.nodes():
-    #     graph.nodes[n]['quarantine'] = int(data.loc[data.index == n, 'quarantine'].values)
-    #     if n in data[data['quarantine']==1].index: # remove all immediate neighbors
-    #         for neighbor in graph.neighbors(n):
-    #             edge_recorder[time_step].append((neighbor, n))
+    for n in graph.nodes():
+        graph.nodes[n]['quarantine'] = int(data.loc[data.index == n, 'quarantine'].values)
+        if n in data[data['quarantine']==1].index: # remove all immediate neighbors
+            for neighbor in graph.neighbors(n):
+                edge_recorder[time_step].append((neighbor, n))
     return data, graph, edge_recorder
     
 
-
-# def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
-#                          time_limit=10, inf_duration=5, quarantine_period=2,
-#                          percent_candidates=0.3, mode='top',
-#                          random_seed=100):
-#     '''Get ground truth for quarantine action
-#     percent_candidates: proportions of nodes to be selected as social distancing cluster center nodes candidates
-#     mode: 'top' or 'bottom' or 'all', 
-#           'top': select the top [percent_candidates] nodes with highest I_ratio (percentage of infected neighbors)
-#           'bottom': select the bottom [percent_candidates] nodes with lowest I_ratio
-#           'all': select all nodes
-
-#     P.S. pr_a is used to select the actual cluster center nodes from candidates'''
-#     # set up random generator
-#     rng = np.random.default_rng(seed=random_seed)
-
-#     graph = network.copy()
-#     data = network_to_df(graph)
-
-#     for n, d in graph.nodes(data=True):
-#         d['D'] = 0
-#         d['R'] = 0
-#         d['t'] = 0
-#         d['I'] = 0
-#         d['quarantine'] = 0
-
-#     # Selecting initial infections
-#     all_ids = [n for n in graph.nodes()]
-#     # infected = random.sample(all_ids, 5)
-#     if len(all_ids) <= 500:
-#         infected = [4, 36, 256, 305, 443]
-#     elif len(all_ids) == 1000:
-#         infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946]
-#     elif len(all_ids) == 2000:
-#         infected = [4, 36, 256, 305, 443, 552, 741, 803, 825, 946,
-#                     1112, 1204, 1243, 1253, 1283, 1339, 1352, 1376, 1558, 1702]
-#     else:
-#         raise ValueError("Invalid network IDs")
-    
-#     # Running through infection cycle
-#     graph_saved_by_time = [] # save graph slice for each time point
-#     edge_recorder = {key:[] for key in range(1, time_limit+1, quarantine_period)} # record edge_to_remove to be add back after the quarantine period has passed
-#     # starts with 1 because the timer below starts with 1
-#     timer = 0
-#     while timer < time_limit:  # Simulate outbreaks until time-step limit is reached
-#         timer += 1
-#         print(f'time {timer}')
-#         # for inf in sorted(infected, key=lambda _: random.random()):
-#         for inf in sorted(infected, key=lambda _: rng.random()):
-#             # Book-keeping for infected nodes
-#             graph.nodes[inf]['I'] = 1
-#             graph.nodes[inf]['D'] = 1
-#             graph.nodes[inf]['t'] += 1
-
-#             if graph.nodes[inf]['t'] > inf_duration:
-#                 graph.nodes[inf]['I'] = 0         # Node is no longer infectious after this loop
-#                 graph.nodes[inf]['R'] = 1         # Node switches to Recovered
-#                 infected.remove(inf)
-            
-#             # Calculate summary measure
-#             start_time = time.time()
-#             data, graph = update_summary_measures(data, graph)
-#             end_time = time.time()
-#             print(f'update_summary_measures(): {end_time-start_time:.3f} sec')
-
-#             # Apply quarantine actions
-#             if quarantine_period == 1:
-#                 start_time = time.time()
-#                 data, graph, edge_recorder = apply_quarantine_action(data, graph, shift, restricted, edge_recorder, timer, rng,
-#                                                                      pr_a, percent_candidates, mode)
-#                 end_time = time.time()
-#                 print(f'apply_quarantine_action(): {end_time-start_time:.3f} sec')
-#                 # print(f'time {time}: inf {inf} from {infected}')
-#             else:
-#                 if timer % quarantine_period == 1:
-#                     start_time = time.time()
-#                     data, graph, edge_recorder = apply_quarantine_action(data, graph, shift, restricted, edge_recorder, timer, rng,
-#                                                                          pr_a, percent_candidates, mode)
-#                     end_time = time.time()
-#                     print(f'apply_quarantine_action(): {end_time-start_time:.3f} sec')
-#                     # print(f'time {time}: inf {inf} from {infected}')  
-            
-#             # Simulate infections of immediate neighbors
-#             time_start = time.time()
-#             graph, infected = simulate_infection_of_immediate_neighbors(graph, inf, infected, rng)
-#             time_end = time.time()
-#             print(f'simulate_infection_of_immediate_neighbors(): {time_end-time_start:.3f} sec')
-
-#         # save graph at current time step
-#         graph_saved_by_time.append(graph.copy())
-#         # update graph for next time step
-#         if quarantine_period == 1:
-#             start_time = time.time()
-#             graph = update_edge_in_graph(graph, edge_recorder, timer, quarantine_period)
-#             end_time = time.time()
-#             print(f'update_edge_in_graph(): {end_time-start_time:.3f} sec')
-#         else:
-#             if timer % quarantine_period == 1:
-#                 start_time = time.time()
-#                 graph = update_edge_in_graph(graph, edge_recorder, timer, quarantine_period)
-#                 end_time = time.time()
-#                 print(f'update_edge_in_graph(): {end_time-start_time:.3f} sec')
-    
-#     dis_save_by_time = []
-#     for g in graph_saved_by_time:
-#         dis = [] 
-#         for nod, d in g.nodes(data=True):
-#             dis.append(d['D'])
-#         dis_save_by_time.append(np.mean(dis))
-
-#     # return np.mean(dis), dis_save_by_time, graph_saved_by_time # save last time point and the whole time series
-#     return np.mean(dis), dis_save_by_time # save last time point and the whole time series
 
 def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
                          time_limit=10, inf_duration=5, quarantine_period=2,
@@ -721,7 +591,7 @@ def quarantine_dgm_truth(network, pr_a, shift=False, restricted=False,
     # return np.mean(dis), dis_save_by_time, graph_saved_by_time # save last time point and the whole time series
     return np.mean(dis), dis_save_by_time # save last time point and the whole time series
 
-     
+    
 
 
 if __name__ == '__main__':
@@ -733,7 +603,7 @@ if __name__ == '__main__':
     # random.seed(17)
     # np.random.seed(17)
 
-    # n=2000
+    # n=500
     # restricted=False # only for random network
 
     # # proportion to be removed: if no node selection is made, the proportion is the same for all nodes
@@ -764,7 +634,8 @@ if __name__ == '__main__':
     #             print((tmp_df['D'] == 1).sum())
     #             print(tmp_df['D'][tmp_df['D'] == 1].index)
     #         print()
-
+        
+    
     
     # # social distancing 
     # ## uniform
@@ -809,18 +680,11 @@ if __name__ == '__main__':
     
     # # quarantine
     # # uniform
-    # start_time = time.time()
     # G, cat_vars, cont_vars, cat_unique_levels = load_uniform_vaccine(n=n, return_cat_cont_split=True)
-    # end_time = time.time()
-    # print(f'load_uniform_vaccin(): {end_time - start_time:.2f} sec(s)')
-
-    # start_time = time.time()
     # H, network_list, cat_vars, cont_vars, cat_unique_levels = quarantine_dgm_time_series(G, restricted=False, 
     #                                                                                      time_limit=10, inf_duration=5, quarantine_period=2,
     #                                                                                      update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
     #                                                                                      random_seed=3407)
-    # end_time = time.time()
-    # print(f'quarantine_dgm_time_series(): {end_time - start_time:.2f} sec(s)')
     # print(f'quarantine uniform n={n}: {cat_unique_levels}')
 
     # # check if the quarantine is applied correctly
@@ -830,13 +694,10 @@ if __name__ == '__main__':
     # ### ground truth
     # results = {}
     # for pr_a in prop_treated:
-    #     start_time = time.time()
     #     ground_truth_last, ground_truth_all = quarantine_dgm_truth(G, pr_a, shift=shift, restricted=False,
     #                                                                time_limit=10, inf_duration=5, quarantine_period=2,
     #                                                                percent_candidates=0.3, mode='top',
     #                                                                random_seed=3407) 
-    #     end_time = time.time()
-    #     print(f'time elapes: {end_time - start_time} sec(s)')
     #     print(f'pr_a: {pr_a}')
     #     print(f'ground truth: {ground_truth_last}')
     #     print(f'grond truth all time point: {ground_truth_all}')
@@ -950,8 +811,7 @@ if __name__ == '__main__':
     #                 print()
     # print()
     # print('+++++++++++++++++++++++++++++++++++++++ random graph +++++++++++++++++++++++++++++++++++++++')
-    # # for n in [500, 1000, 2000]:
-    # for n in [1000, 2000]:
+    # for n in [500, 1000, 2000]:
     # # for n in [2000]:
     #     for restricted in [True, False]:
     #         for shift in [True, False]:

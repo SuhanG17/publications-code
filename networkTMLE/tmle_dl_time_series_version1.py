@@ -168,12 +168,12 @@ class NetworkTMLETimeSeries:
                 self._max_degree_list_ = [np.max([d for n, d in network.degree]) for network in network_list]
 
         # Generate a fresh copy of the network with ascending node order
-        self.oid = "_original_id_"                                                                   # Name to save the original IDs
+        oid = "_original_id_"                                                                   # Name to save the original IDs
         labeled_network_list = []
         for network in network_list:
             network = nx.convert_node_labels_to_integers(network,                               # Copy of new network with new labels
                                                         first_label=0,                          #  ... start at 0 for latent variance calc
-                                                        label_attribute=self.oid)                    # ... saving the original ID labels
+                                                        label_attribute=oid)                    # ... saving the original ID labels
             labeled_network_list.append(network)                                                # ... saving to list
 
         # Saving processed data copies
@@ -220,7 +220,7 @@ class NetworkTMLETimeSeries:
         summary_types = ['sum', 'mean', 'var', 'mean_dist', 'var_dist']                             # Default summary measures available
         handle_isolates = ['mean', 'var', 'mean_dist', 'var_dist']                                  # Whether isolates produce nan's
         for i in range(len(df_list)):         
-            for v in [var for var in list(df_list[i].columns) if var not in [self.oid, outcome]]:        # All cols besides ID and outcome
+            for v in [var for var in list(df_list[i].columns) if var not in [oid, outcome]]:        # All cols besides ID and outcome
                 v_vector = np.asarray(df_list[i][v])                                                # ... extract array of column
                 for summary_measure in summary_types:                                               # ... for each summary measure
                     df_list[i][v+'_'+summary_measure] = fast_exp_map(self.adj_matrix_list[i],       # ... calculate corresponding measure
@@ -550,7 +550,7 @@ class NetworkTMLETimeSeries:
         #                             self._Qinit_)                                           # ... otherwise keep
 
     def fit(self, p, samples=100, bound=None, seed=None,
-            shift=False, mode='top', percent_candidates=0.3, quarantine_period=2,
+            shift=False, mode='top', percent_candidates=0.3,
             T_in_id=[*range(10)], T_out_id=[*range(10)]):
         """Estimation procedure under a specified treatment plan.
 
@@ -608,7 +608,6 @@ class NetworkTMLETimeSeries:
                                                                                               shift=shift,
                                                                                               mode=mode,
                                                                                               percent_candidates=percent_candidates,
-                                                                                              quarantine_period=quarantine_period,
                                                                                               T_in_id=T_in_id, T_out_id=T_out_id)                 
 
         # Saving some information for diagnostic procedures
@@ -666,17 +665,8 @@ class NetworkTMLETimeSeries:
         #     y_star = np.where(y_star > self._continuous_max_list_[-1], self._continuous_max_list_[-1], y_star)
 
         # Updating predictions via intercept from targeting step
-        # # Article equation version, which is the same as described in the article, 
-        # # but probability_to_odd() and odds_to_probability() cannot handle zero division and create nans when y_star == 1
-        # logit_qstar = np.log(probability_to_odds(y_star)) + epsilon                         # NOTE: needs to be logit(Y^*) + e
-        # q_star = odds_to_probability(np.exp(logit_qstar))                                   # Back converting from odds
-        # Stablized version: handles zero division problem and when y_star contains one, the q_star will report 1 correspondingly
-        q_star = (y_star * np.exp(epsilon)) / (1 - y_star + y_star * np.exp(epsilon))
-        # # if need to check the results of q_star equals, rename variable to q_star_eq and q_star_stable
-        # where_they_differ = np.isclose(q_star_eq, q_star_stable).sum()
-        # print(f'Two versions have {len(where_they_differ)} differences')
-        # print(f'Equation version q_star: {q_star_eq[~np.isclose(q_star_eq, q_star_stable)]}')
-        # print(f'Stable version q_star: {q_star_stable[~np.isclose(q_star_eq, q_star_stable)]}')
+        logit_qstar = np.log(probability_to_odds(y_star)) + epsilon                         # NOTE: needs to be logit(Y^*) + e
+        q_star = odds_to_probability(np.exp(logit_qstar))                                   # Back converting from odds
         pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star                         # Storing predictions as column
 
         # Taking the mean, grouped-by the pooled sample IDs (fast)
@@ -907,6 +897,23 @@ class NetworkTMLETimeSeries:
 
         return ax
 
+    # def define_threshold(self, variable, threshold):
+    #     """Function arbitrarily allows for multiple different defined thresholds
+
+    #     Parameters
+    #     ----------
+    #     variable : str
+    #         Variable to generate categories for
+    #     threshold : int, float
+    #         Threshold to use as the cutpoint.
+    #     """
+    #     self._thresholds_any_ = True                    # Update logic to understand at least one threshold exists
+    #     self._thresholds_.append(threshold)             # Add the threshold to the list to look at
+    #     self._thresholds_variables_.append(variable)    # Add the variable to the list to make thresholds for
+    #     create_threshold(self.df_restricted,            # Create the desired threshold variable
+    #                      variables=[variable],          # ... for the specified variable
+    #                      thresholds=[threshold])        # ... at the desired threshold
+
     def define_threshold(self, variable, threshold, definition):
         """Function arbitrarily allows for multiple different defined thresholds
 
@@ -922,7 +929,11 @@ class NetworkTMLETimeSeries:
         self._thresholds_any_ = True                    # Update logic to understand at least one threshold exists
         self._thresholds_.append(threshold)             # Add the threshold to the list to look at
         self._thresholds_variables_.append(variable)    # Add the variable to the list to make thresholds for
-        self._thresholds_def_.append(definition)    
+        self._thresholds_def_.append(definition)
+        # create_threshold(self.df_restricted,            # Create the desired threshold variable
+        #                  variables=[variable],          # ... for the specified variable
+        #                  thresholds=[threshold],        # ... at the desired threshold
+        #                  definitions=[definition])        
         
         for i in range(len(self.df_restricted_list)):
             create_threshold(self.df_restricted_list[i],            # Create the desired threshold variable
@@ -947,7 +958,11 @@ class NetworkTMLETimeSeries:
         self._categorical_variables_.append(variable)   # Add the variable to the list of category-generations
         self._categorical_.append(bins)                 # Add the cut-points for the bins to the list of bins
         self._categorical_def_.append(labels)           # Add the specified labels for the bins to the label list
-
+        # create_categorical(data=self.df_restricted,     # Create the desired category variable
+        #                    variables=[variable],        # ... for the specified variable
+        #                    bins=[bins],                 # ... for the specified bins
+        #                    labels=[labels],             # ... with the specified labels
+        #                    verbose=True)                # ... warns user if NaN's are being generated
         for i in range(len(self.df_restricted_list)):
             create_categorical(data=self.df_restricted_list[i],     # Create the desired category variable
                                variables=[variable],        # ... for the specified variable
@@ -955,7 +970,7 @@ class NetworkTMLETimeSeries:
                                labels=[labels],             # ... with the specified labels
                                verbose=True)                # ... warns user if NaN's are being generated
 
-    def _estimate_iptw_ts_(self, p, samples, bound, seed, shift, mode, percent_candidates, quarantine_period, T_in_id, T_out_id):
+    def _estimate_iptw_ts_(self, p, samples, bound, seed, shift, mode, percent_candidates, T_in_id, T_out_id):
         """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
         of Causal Inference 2017
 
@@ -1012,14 +1027,56 @@ class NetworkTMLETimeSeries:
             self._denominator_estimated_ = True  # Updates flag for denominator
 
         # Creating pooled sample to estimate weights
-        pooled_data_restricted_list, pooled_adj_matrix_list = self._generate_pooled_samples(samples=samples,
-                                                                                            seed=seed,
-                                                                                            shift=shift,
-                                                                                            mode=mode,
-                                                                                            percent_candidates=percent_candidates,
-                                                                                            p=p,
-                                                                                            quarantine_period=quarantine_period)
+        pooled_data_restricted_list = []
+        pooled_adj_matrix_list = []
 
+        # initiate network, adj_matrix, _max_degree_  for the first time step
+        samples_network_list = [self.network_list[0] for _ in range(samples)]
+        samples_adj_matrix_list = [self.adj_matrix_list[0] for _ in range(samples)] 
+        samples_max_degree_list_ = [self._max_degree_list_[0] for _ in range(samples)]
+        # include the first time step adj_matrix list
+        pooled_adj_matrix_list.append(samples_adj_matrix_list)
+
+        for time_step, df in enumerate(self.df_list):
+            pooled_df, updated_network_list, updated_adj_matrix_list, updated_max_degree_list = self._generate_pooled_sample_per_slice(df=df,
+                                                                                                              network_list=samples_network_list,
+                                                                                                              adj_matrix_list=samples_adj_matrix_list,
+                                                                                                              _max_degree_list=samples_max_degree_list_,
+                                                                                                              p=p,                                      # Generate data under policy
+                                                                                                              samples=samples,                          # ... for m samples
+                                                                                                              seed=seed+time_step,                      # ... with a provided seed, increment for every step
+                                                                                                              shift=shift,
+                                                                                                              mode=mode, 
+                                                                                                              percent_candidates=percent_candidates)                      
+            samples_network_list = updated_network_list
+            samples_adj_matrix_list = updated_adj_matrix_list
+            samples_max_degree_list_ = updated_max_degree_list
+
+            pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()             # Restricting pooled sample
+
+            # ensure pooled data contains all exposure levels in observed data``
+            if self.use_deep_learner_A_i_s:
+                regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted_list[time_step])
+                print(f'before while loop regenerate_flag: {regenerate_flag}')
+                while regenerate_flag:
+                    print(f'regenerating pooled sample for {self._gs_measure_}')
+                    pooled_df, updated_network_list, updated_adj_matrix_list, updated_max_degree_list = self._generate_pooled_sample_per_slice(df=df,
+                                                                                                              network_list=samples_network_list,
+                                                                                                              adj_matrix_list=samples_adj_matrix_list,
+                                                                                                              _max_degree_list=samples_max_degree_list_,
+                                                                                                              p=p,                                      # Generate data under policy
+                                                                                                              samples=samples,                          # ... for m samples
+                                                                                                              seed=seed+time_step)
+                    samples_network_list = updated_network_list
+                    samples_adj_matrix_list = updated_adj_matrix_list
+                    samples_max_degree_list_ = updated_max_degree_list
+                     
+                    pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()              # Restricting pooled sample
+                    regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, self.df_restricted_list[time_step])
+                    print(f'in while loop regenerate_flag: {regenerate_flag}')
+                    print()
+            pooled_data_restricted_list.append(pooled_data_restricted)
+            pooled_adj_matrix_list.append(samples_adj_matrix_list)
 
         # Estimate the numerator using the pooled data
         # remove the adj_matrix for the final time step, retain the adj_matrix for the first time step
@@ -1046,8 +1103,147 @@ class NetworkTMLETimeSeries:
         return iptw, pooled_data_restricted_list, pooled_adj_matrix_list
     
 
+    # def _estimate_iptw_ts_(self, p, samples, bound, seed):
+    #     """Background function to estimate the IPTW based on the algorithm described in Sofrygin & van der Laan Journal
+    #     of Causal Inference 2017
+
+    #     IPTW are estimated using the following process.
+
+    #     For the observed data, models are fit to estimate the Pr(A=a) for individual i (treating as IID data) and then
+    #     the Pr(A=a) for their contacts (treated as IID data). These probabilities are then multiplied together to
+    #     generate the denominator.
+
+    #     To calculate the numerator, the input data set is replicated `samples` times. To each of the data set copies,
+    #     the treatment plan is repeatedly applied. From this large set of observations under the stochastic treatment
+    #     plan of interest, models are again fit to the data, same as the prior procedure. The corresponding probabilities
+    #     are then multiplied together to generate the numerator.
+
+    #     Note: not implemented but the `deterministic` argument will use the following procedure. When a deterministic
+    #     treatment plan (like all-treat)vis input, only a single data set under the treatment plan is generated. This
+    #     saves computation time since all the replicate data sets would be equivalent. The deterministic part will be
+    #     resolved in an earlier procedure
+
+    #     SG_modified: time series version to generate pooled data and weights: 
+    #     If exposure nuisance model is NOT deep learner, then denominator and numerator is estimated via the last time slice dataframe.
+    #     The pooled data is longitudinal, generated per time slice. But the generated prediction from model is still the last time slice, same as non-ts version.        
+
+    #     Parameters
+    #     ----------
+    #     p : float, array
+    #         Probability of A_i as assigned by the policy
+    #     samples : int
+    #         Number of sampled data sets to generate
+    #     bound : None, int, float
+    #         Bounds to truncate calculate weights with
+    #     seed : None, int
+    #         Seed for pooled data set creation
+        
+    #     Retunrs
+    #     ----------
+    #     iptw: array
+    #         Weights for targeting
+    #     pooled_data_restricted_list: list
+    #         List of dataframes to pooled data, len() = T        
+    #     """
+    #     # Estimate the denominator if not previously estimated
+    #     if not self._denominator_estimated_:
+    #         self._denominator_ = self._estimate_exposure_nuisance_ts_(data_to_fit_list=self.df_restricted_list.copy(),
+    #                                                                   data_to_predict_list=self.df_restricted_list.copy(),
+    #                                                                   distribution=self._map_dist_,
+    #                                                                   verbose_label='Weight - Denominator',
+    #                                                                   store_model=True,
+    #                                                                   custom_path_prefix='denom_',
+    #                                                                   print_every=5)
+    #         self._denominator_estimated_ = True  # Updates flag for denominator
+
+    #     # Creating pooled sample to estimate weights
+    #     pooled_data_restricted_list = []
+    #     for df, network, _max_degree_, df_restricted in zip(self.df_list, self.network_list, self._max_degree_list_, self.df_restricted_list):
+    #         pooled_df = self._generate_pooled_sample_per_slice(df=df,
+    #                                                            network=network,
+    #                                                            _max_degree_=_max_degree_,
+    #                                                            p=p,                                      # Generate data under policy
+    #                                                            samples=samples,                          # ... for m samples
+    #                                                            seed=seed)                                # ... with a provided seed
+    #         pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()             # Restricting pooled sample
+
+    #         # ensure pooled data contains all exposure levels in observed data``
+    #         if self.use_deep_learner_A_i_s:
+    #             regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, df_restricted)
+    #             print(f'before while loop regenerate_flag: {regenerate_flag}')
+    #             while regenerate_flag:
+    #                 print(f'regenerating pooled sample for {self._gs_measure_}')
+    #                 pooled_df = self._generate_pooled_sample_per_slice(df=df,
+    #                                                                    network=network,
+    #                                                                    _max_degree_=_max_degree_,
+    #                                                                    p=p,                                       # Generate data under policy
+    #                                                                    samples=samples,                           # ... for m samples
+    #                                                                    seed=seed)                                 # ... with a provided seed
+    #                 pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()              # Restricting pooled sample
+    #                 regenerate_flag = check_pooled_sample_levels(self._gs_measure_, pooled_data_restricted, df_restricted)
+    #                 print(f'in while loop regenerate_flag: {regenerate_flag}')
+    #                 print()
+    #         pooled_data_restricted_list.append(pooled_data_restricted)
+
+    #     # Estimate the numerator using the pooled data
+    #     numerator = self._estimate_exposure_nuisance_ts_(data_to_fit_list=pooled_data_restricted_list.copy(),
+    #                                                      data_to_predict_list=self.df_restricted_list.copy(),
+    #                                                      distribution=self._map_dist_,
+    #                                                      verbose_label='Weight - Numerator',
+    #                                                      store_model=False,
+    #                                                      custom_path_prefix='num_',
+    #                                                      # kwargs
+    #                                                      batch_size=512,
+    #                                                      print_every=15)
+
+    #     # Calculating weight: H = Pr*(A,A^s | W,W^s) / Pr(A,A^s | W,W^s)
+    #     iptw = numerator / self._denominator_           # Divide numerator by denominator
+    #     if bound is not None:                           # If weight bound provided
+    #         iptw = bounding(ipw=iptw, bound=bound)      # ... apply the bound
+
+    #     # Return both the array of estimated weights and the generated pooled data set
+    #     return iptw, pooled_data_restricted_list
+    
+    def get_edges_to_remove_and_update_exposure(self, g, network, exposure):
+        infected = g[g['I'] == 1].index
+        exposed = g[g[exposure] == 1].index
+        network_current = network.copy()
+
+        edges_to_remove = []
+        actually_exposed_contact = []
+        for inf in infected:
+            for contact in nx.neighbors(network_current, inf):
+                if network_current.nodes[contact]["D"] == 1: # if nodes are already recoverd, pass
+                    pass
+                else: # apply quarantine
+                    if contact in exposed:
+                        edges_to_remove.append((inf, contact))
+                        actually_exposed_contact.append(contact)
+        
+        # Update exposure
+        updated_exposure = np.where(g.index.isin(actually_exposed_contact), 1, 0)
+        # restrict to the appropriate degree
+        g[exposure] = np.where(g['__degree_flag__'] == 1, g[exposure], updated_exposure)
+
+        return edges_to_remove, network_current, g
+
+    def update_graph_and_adj_matrix(self, edges_to_remove, network_current):
+        network_current.remove_edges_from(edges_to_remove)
+        adj_matrix = nx.adjacency_matrix(network_current, weight=None) 
+
+        if self.degree_restrict is not None:                                                         
+            self._check_degree_restrictions_(bounds=self.degree_restrict)                           
+            _max_degree_ = self.degree_restrict[1]                    
+        else:                                                                                   
+            if nx.is_directed(network_current):
+                _max_degree_ = np.max([d for n, d in network_current.out_degree])                                                         
+            else:                  
+                _max_degree_ = np.max([d for n, d in network_current.degree])                                                           
+
+        return network_current, adj_matrix, _max_degree_
+    
     def select_candiate_nodes(self, data, mode, percent_candidates, pr_a, rng):  
-        '''select candidates for quarantine based on the nodes' degree'''
+        # select candidates for quarantine based on the nodes' degree
         if mode == 'top':
             num_candidates = math.ceil(data.shape[0] * percent_candidates)
             candidates_nodes = data.nlargest(num_candidates, 'degree').index
@@ -1064,384 +1260,129 @@ class NetworkTMLETimeSeries:
         quarantine = np.zeros(data.shape[0])
         quarantine[quarantine_nodes] = 1 
         return quarantine
-    
-    def update_degree_and_I_ratio(self, g, network):
-        '''Update degree and I_ratio for current step
-        CAVEAT: should be called before update_summary_measure() for I_ratio has summary measure to be updated'''
-        # update degree
-        if nx.is_directed(network):
-            degree_data = pd.DataFrame.from_dict(dict(network.out_degree),             
-                                                 orient='index').rename(columns={0: 'degree'}) 
-        else:
-            degree_data = pd.DataFrame.from_dict(dict(network.degree),                 
-                                                 orient='index').rename(columns={0: 'degree'})
-        g['degree'] = degree_data
 
-        # update I_ratio
-        adj_matrix_tmp = nx.adjacency_matrix(network, weight=None)
-        I_sum = fast_exp_map(adj_matrix_tmp, np.array(g['I']), measure='sum') # I_sum is calculated but not updated in g
-        g['I_ratio'] = I_sum / g['degree'] # ratio of infected neighbors
-        g['I_ratio'] = g['I_ratio'].fillna(0) # set nan to 0
+    def _generate_pooled_sample_per_slice(self, df, network_list, adj_matrix_list, _max_degree_list, 
+                                          p, samples, seed,
+                                          shift, mode, percent_candidates):
+        """
 
-        return g
+        Note
+        ----
+        Vectorization doesn't work, since the matrix manipulations get extremely large (even when using
+        scipy.sparse.block_diag()). So here the loop is more efficient due to how the summary measures are being
+        calculated via matrix multiplication.
 
-        
-    def update_quarantine(self, g, rng, shift, mode, percent_candidates, p):
-        '''Update summary measures based on current adj_matrix
-           CAVEAT: should be called after update_degree_and_I_ratio() and update_quarantine() for these measures are updated'''
-        if shift:
-            probs = rng.binomial(n=1,                              # Flip a coin to generate A_i
-                                p=p,                               # ... based on policy-assigned probabilities
-                                size=g.shape[0])                   # ... for the N units
-        else:   
-            # New mechanism to apply quarantine
-            # print(f'Apply New Mechanism for Quarantine, mode {mode}, percent_candidates {percent_candidates}')
-            probs = self.select_candiate_nodes(data=g, 
-                                               mode=mode, percent_candidates=percent_candidates, 
-                                               pr_a=p, rng=rng)
-        
-        g[self.exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degåree
-                                    g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
-        
-        return g
-        
-
-    def update_summary_measure(self, g, adj_matrix):
-        '''Update summary measures based on current adj_matrix
-        CAVEAT: should be called after update_degree_and_I_ratio() and update_quarantine() for these measures are updated
-        '''
-        summary_types = ['sum', 'mean', 'var', 'mean_dist', 'var_dist']                # Default summary measures available
-        handle_isolates = ['mean', 'var', 'mean_dist', 'var_dist'] 
-        input_df = network_to_df(self.network_list[0])                                 # Extract the variables from the original data
-        for v in [var for var in list(input_df.columns) if var not in [self.oid, self.outcome]]: # summary measure is generated for each original varible
-            v_vector = np.asarray(g[v])                                                # ... extract array of column
-            for summary_measure in summary_types:                                      # ... for each summary measure
-                g[v+'_'+summary_measure] = fast_exp_map(adj_matrix,                    # ... calculate corresponding measure
-                                                        v_vector,
-                                                        measure=summary_measure)
-                if summary_measure in handle_isolates:                                 # ... set isolates from nan to 0
-                    g[v+'_'+summary_measure] = g[v+'_'+summary_measure].fillna(0)
-        return g
-
-    def update_graph_connections(self, g, network, time_step, edge_recorder, quarantine_period):
-        # apply quarantine to all selected nodes: remove immediate neighbors for the next time step
-        # function version
-        if nx.is_directed(network):
-            raise NotImplementedError("Directed graph is not supported yet")
-        else:
-            nx.set_node_attributes(network, dict(g['quarantine']), 'quarantine')
-            edge_recorder[time_step] = list(nx.edges(network, g[g['quarantine']==1].index))
-        # # for-loop version
-        # for n in network.nodes():
-        #     if n in g[g['quarantine']==1].index: # remove all immediate neighbors
-        #         for neighbor in network.neighbors(n):
-        #             edge_recorder[time_step].append((neighbor, n))
-
-        # Add back edges to represent end of quarantine and remove current quarantined patients
-        if time_step - quarantine_period > 0: 
-            network.add_edges_from(edge_recorder[time_step-quarantine_period]) 
-        network.remove_edges_from(edge_recorder[time_step]) # remove current quarantined edges
-
-        return edge_recorder, network
-    
-    def update_adj_matrix(self, network):
-        adj_matrix = nx.adjacency_matrix(network, weight=None) 
-
-        if self.degree_restrict is not None:                                                         
-            self._check_degree_restrictions_(bounds=self.degree_restrict)                           
-            _max_degree_ = self.degree_restrict[1]                    
-        else:                                                                                   
-            if nx.is_directed(network):
-                _max_degree_ = np.max([d for n, d in network.out_degree])                                                         
-            else:                  
-                _max_degree_ = np.max([d for n, d in network.degree])
-        
-        return adj_matrix, _max_degree_
-
-    
-    def _generate_pooled_samples(self, samples, seed, shift, mode, percent_candidates, p,
-                                 quarantine_period):
-        # initiate lists to store pooled data, network, adj_matrix, _max_degree_ for all samples
-        pooled_all_samples = []
-        network_all_samples = []
-        adj_matrix_all_samples = []
-        _max_degree_all_samples = []
-
-        # for each sample drawn, the process of generating time_limit steps of data is recorded
-        for s in range(samples): 
-            # initiate rng seed for bootstraps
-            rng = np.random.default_rng(seed+s)
-            # initiate dataframe for the first time step
-            g = self.df_list[0].copy()
-            # initiate network, adj_matrix, _max_degree_  for the first time step
-            network_init = [self.network_list[0].copy()]
-            adj_matrix_init = [self.adj_matrix_list[0].copy()]
-            _max_degree_init = [self._max_degree_list_[0].copy()]
-            # initiate edge_recorders to record edges to remove/add back for each quarantine_period
-            edge_recorder = {key:[] for key in range(0, len(self.df_list), quarantine_period)} # record edge_to_remove to be add back after the quarantine period has passed
-            # starts with 0 because the timer below starts with 0, different from quarantine_dgm_truth()
-
-            # intiate pooled sample list
-            pooled_per_sample = []
-
-            for time_step in range(len(self.df_list)):                
-                network_current = network_init[time_step].copy()
-                adj_matrix_current = adj_matrix_init[time_step].copy()
-                _max_degree_current = _max_degree_init[time_step].copy()
-                if time_step > 0:
-                    g = self.update_degree_and_I_ratio(g, network_current)
-
-                # update quarantine measure, summary measure for all vars for current time step,
-                # update graph and adj_matrix for next time step
-                if time_step % quarantine_period == 0:
-
-                    g = self.update_quarantine(g, rng, shift, mode, percent_candidates, p)
-                    g = self.update_summary_measure(g, adj_matrix_current)
-                   
-                    edge_recorder, network_current = self.update_graph_connections(g, network_current, time_step, edge_recorder, quarantine_period) 
-                    adj_matrix_current, _max_degree_current = self.update_adj_matrix(network_current)
-
-                    network_init.append(network_current)
-                    adj_matrix_init.append(adj_matrix_current)
-                    _max_degree_init.append(_max_degree_current)
-                
-                else: # update summary measure base on current adj_matrix
-                    if time_step != len(self.df_list) - 1: # DO NOT add the network, adj_matrix and _max_degree_ for the last time step                        
-                        g = self.update_summary_measure(g, adj_matrix_current)
-                        network_init.append(network_current)
-                        adj_matrix_init.append(adj_matrix_current)
-                        _max_degree_init.append(_max_degree_current)
-
-                 # Logic if no summary measure was specified (uses the complete factor approach)
-                if self._gs_measure_ is None:
-                    network_tmp = network_init[time_step].copy()
-                    a = np.array(g[self.exposure])                              # Transform A_i into array
-                    for n in network_tmp.nodes():                               # For each node,
-                        network_tmp.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
-                    df = exp_map_individual(network_tmp,                        # Now do the individual exposure maps with new
-                                            variable=self.exposure,
-                                            max_degree=_max_degree_init[time_step]).fillna(0)
-                    for c in self._nonparam_cols_[-1]:                          # Adding back these np columns
-                        g[c] = df[c] 
-                    
-                # Re-creating any threshold variables in the pooled sample data
-                if self._thresholds_any_:
-                    create_threshold(data=g,
-                                     variables=self._thresholds_variables_,
-                                     thresholds=self._thresholds_,
-                                     definitions=self._thresholds_def_)
-
-                # Re-creating any categorical variables in the pooled sample data
-                if self._categorical_any_:
-                    create_categorical(data=g,
-                                       variables=self._categorical_variables_,
-                                       bins=self._categorical_,
-                                       labels=self._categorical_def_,
-                                       verbose=False)
-
-                g['_sample_id_'] = s                # Setting sample ID
-                pooled_per_sample.append(g.copy())      # Adding to list (for later concatenate)
-
-            pooled_all_samples.append(pooled_per_sample) # append pooled sample for each sample
-            network_all_samples.append(network_init) # append network for each sample
-            adj_matrix_all_samples.append(adj_matrix_init) # append adj_matrix for each sample
-            _max_degree_all_samples.append(_max_degree_init) # append _max_degree_ for each sample
-                
-
-        # re-arrange list of lists: each elemental list should contain all samples and the number of sublists equals to time_limit
-        pooled_all_samples_rearrange = [list(i) for i in zip(*pooled_all_samples)]
-        pooled_adj_matrix_list = [list(i) for i in zip(*adj_matrix_all_samples)]
-
-        pooled_data_restricted_list = []
-        for pooled_sample_for_one_time_step in pooled_all_samples_rearrange:
-            df_one_step = pd.concat(pooled_sample_for_one_time_step, axis=0, ignore_index=True)
-            pooled_data_restricted = df_one_step.loc[df_one_step['__degree_flag__'] == 0].copy()
-            pooled_data_restricted_list.append(pooled_data_restricted)
-            # print('code is reachable')
-
-        return pooled_data_restricted_list, pooled_adj_matrix_list
+        Parameters
+        ----------
+        df: pd.Dataframe 
+            dataframe of current time step
+        network_list : list
+            list of networks for current time step, len(network_list) = samples. NOTE: different from self.network_list
+        adj_matrix_list : list
+            list of adj_matrix for current time step, len(adj_matrix_list) = samples
+        _max_degree_list : list
+            list of max_degree for current time step, len(_max_degree_list) = samples
+        p : float, array
+            Probability of A_i as assigned by the policy
+        samples : int
+            Number of sampled data sets to generate
+        seed : None, int
+            Seed for pooled data set creation
+        shift: bool
+            if shift strategy is used, then no need to apply new mechanism for quarantine
+        mode : str
+            'top' or 'bottom' or 'all', 
+            'top': select the top [percent_candidates] nodes with highest I_ratio (percentage of infected neighbors)
+            'bottom': select the bottom [percent_candidates] nodes with lowest I_ratio
+            'all': select all nodes
+        percent_candidates : float
+            proportions of nodes to be selected as social distancing cluster center nodes candidates
 
 
-    # def get_edges_to_remove_and_update_exposure(self, g, network, exposure):
-    #     infected = g[g['I'] == 1].index
-    #     exposed = g[g[exposure] == 1].index
-    #     network_current = network.copy()
+        Returns
+        -------
+        dataframe
+            Pooled data set under applications of the policy omega
+        """
+        # Prep for pooled data set creation
+        rng = np.random.default_rng(seed)  # Setting the seed for bootstraps
+        pooled_sample = []
+        # TODO one way to potentially speed up code is to run this using Pool. Easy for parallel
+        # this is also the best target for optimization since it takes about ~85% of current run times
 
-    #     edges_to_remove = []
-    #     actually_exposed_contact = []
-    #     for inf in infected:
-    #         for contact in nx.neighbors(network_current, inf):
-    #             if network_current.nodes[contact]["D"] == 1: # if nodes are already recoverd, pass
-    #                 pass
-    #             else: # apply quarantine
-    #                 if contact in exposed:
-    #                     edges_to_remove.append((inf, contact))
-    #                     actually_exposed_contact.append(contact)
-        
-    #     # Update exposure
-    #     updated_exposure = np.where(g.index.isin(actually_exposed_contact), 1, 0)
-    #     # restrict to the appropriate degree
-    #     g[exposure] = np.where(g['__degree_flag__'] == 1, g[exposure], updated_exposure)
+        updated_network_list = []
+        updated_adj_matrix_list = []
+        updated_max_degree_list = []
+        for s in range(samples):                                    # For each of the *m* samples
+            g = df.copy()                                           # Create a copy of the data
+            if shift:
+                probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
+                                     p=p,                               # ... based on policy-assigned probabilities
+                                     size=g.shape[0])                   # ... for the N units
+            else:   
+                # New mechanism to apply quarantine
+                # print(f'Apply New Mechanism for Quarantine, mode {mode}, percent_candidates {percent_candidates}')
+                probs = self.select_candiate_nodes(data=g, 
+                                                   mode=mode, percent_candidates=percent_candidates, 
+                                                   pr_a=p, rng=rng)
+                # print(f'pooled probs: {probs}')
+            g[self.exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degåree
+                                        g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
 
-    #     return edges_to_remove, network_current, g
+            # Generating all summary measures based on the new exposure (could maybe avoid for all?)
+            g[self.exposure+'_sum'] = fast_exp_map(adj_matrix_list[s], np.array(g[self.exposure]), measure='sum')
+            g[self.exposure + '_mean'] = fast_exp_map(adj_matrix_list[s], np.array(g[self.exposure]), measure='mean')
+            g[self.exposure + '_mean'] = g[self.exposure + '_mean'].fillna(0)            # isolates should have mean=0
+            g[self.exposure + '_var'] = fast_exp_map(adj_matrix_list[s], np.array(g[self.exposure]), measure='var')
+            g[self.exposure + '_var'] = g[self.exposure + '_var'].fillna(0)              # isolates should have mean=0
+            g[self.exposure + '_mean_dist'] = fast_exp_map(adj_matrix_list[s],
+                                                           np.array(g[self.exposure]), measure='mean_dist')
+            g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
+            g[self.exposure + '_var_dist'] = fast_exp_map(adj_matrix_list[s],
+                                                          np.array(g[self.exposure]), measure='var_dist')
+            g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
 
-    # def update_graph_and_adj_matrix(self, edges_to_remove, network_current):
-    #     network_current.remove_edges_from(edges_to_remove)
-    #     adj_matrix = nx.adjacency_matrix(network_current, weight=None) 
+            # update network and adj_matrix based on the exposure policy for next time step
+            # update g for current time step 
+            edges_to_remove, network_current, g = self.get_edges_to_remove_and_update_exposure(g, network_list[s], self.exposure)
+            network_current, adj_matrix, _max_degree_ = self.update_graph_and_adj_matrix(edges_to_remove, network_current)
 
-    #     if self.degree_restrict is not None:                                                         
-    #         self._check_degree_restrictions_(bounds=self.degree_restrict)                           
-    #         _max_degree_ = self.degree_restrict[1]                    
-    #     else:                                                                                   
-    #         if nx.is_directed(network_current):
-    #             _max_degree_ = np.max([d for n, d in network_current.out_degree])                                                         
-    #         else:                  
-    #             _max_degree_ = np.max([d for n, d in network_current.degree])                                                           
+            updated_network_list.append(network_current)
+            updated_adj_matrix_list.append(adj_matrix)
+            updated_max_degree_list.append(_max_degree_)
 
-    #     return network_current, adj_matrix, _max_degree_
-    
-    # def select_candiate_nodes(self, data, mode, percent_candidates, pr_a, rng):  
-    #     # select candidates for quarantine based on the nodes' degree
-    #     if mode == 'top':
-    #         num_candidates = math.ceil(data.shape[0] * percent_candidates)
-    #         candidates_nodes = data.nlargest(num_candidates, 'degree').index
-    #     elif mode == 'bottom':
-    #         num_candidates = math.ceil(data.shape[0] * percent_candidates)
-    #         candidates_nodes = data.nsmallest(num_candidates, 'degree').index
-    #     elif mode == 'all':
-    #         num_candidates = data.shape[0]
-    #         candidates_nodes = data.index
-        
-    #     # quarantine_piror = np.random.binomial(n=1, p=pr_a, size=num_candidates)
-    #     quarantine_piror = rng.binomial(n=1, p=pr_a, size=num_candidates)
-    #     quarantine_nodes = candidates_nodes[quarantine_piror==1]
-    #     quarantine = np.zeros(data.shape[0])
-    #     quarantine[quarantine_nodes] = 1 
-    #     return quarantine
-        
+            # Logic if no summary measure was specified (uses the complete factor approach)
+            if self._gs_measure_ is None:
+                network = network_list[s].copy()                                # Copy the network
+                a = np.array(g[self.exposure])                          # Transform A_i into array
+                for n in network.nodes():                               # For each node,
+                    network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
+                df = exp_map_individual(network,                        # Now do the individual exposure maps with new
+                                        variable=self.exposure,
+                                        max_degree=_max_degree_list[s]).fillna(0)
+                for c in self._nonparam_cols_[-1]:                          # Adding back these np columns
+                    g[c] = df[c]
 
-    # def _generate_pooled_sample_per_slice(self, df, network_list, adj_matrix_list, _max_degree_list, 
-    #                                       p, samples, seed,
-    #                                       shift, mode, percent_candidates):
-    #     """
+            # Re-creating any threshold variables in the pooled sample data
+            if self._thresholds_any_:
+                create_threshold(data=g,
+                                 variables=self._thresholds_variables_,
+                                 thresholds=self._thresholds_,
+                                 definitions=self._thresholds_def_)
 
-    #     Note
-    #     ----
-    #     Vectorization doesn't work, since the matrix manipulations get extremely large (even when using
-    #     scipy.sparse.block_diag()). So here the loop is more efficient due to how the summary measures are being
-    #     calculated via matrix multiplication.
+            # Re-creating any categorical variables in the pooled sample data
+            if self._categorical_any_:
+                create_categorical(data=g,
+                                   variables=self._categorical_variables_,
+                                   bins=self._categorical_,
+                                   labels=self._categorical_def_,
+                                   verbose=False)
 
-    #     Parameters
-    #     ----------
-    #     df: pd.Dataframe 
-    #         dataframe of current time step
-    #     network_list : list
-    #         list of networks for current time step, len(network_list) = samples. NOTE: different from self.network_list
-    #     adj_matrix_list : list
-    #         list of adj_matrix for current time step, len(adj_matrix_list) = samples
-    #     _max_degree_list : list
-    #         list of max_degree for current time step, len(_max_degree_list) = samples
-    #     p : float, array
-    #         Probability of A_i as assigned by the policy
-    #     samples : int
-    #         Number of sampled data sets to generate
-    #     seed : None, int
-    #         Seed for pooled data set creation
-    #     shift: bool
-    #         if shift strategy is used, then no need to apply new mechanism for quarantine
-    #     mode : str
-    #         'top' or 'bottom' or 'all', 
-    #         'top': select the top [percent_candidates] nodes with highest I_ratio (percentage of infected neighbors)
-    #         'bottom': select the bottom [percent_candidates] nodes with lowest I_ratio
-    #         'all': select all nodes
-    #     percent_candidates : float
-    #         proportions of nodes to be selected as social distancing cluster center nodes candidates
+            g['_sample_id_'] = s         # Setting sample ID
+            pooled_sample.append(g)      # Adding to list (for later concatenate)
 
-
-    #     Returns
-    #     -------
-    #     dataframe
-    #         Pooled data set under applications of the policy omega
-    #     """
-    #     # Prep for pooled data set creation
-    #     rng = np.random.default_rng(seed)  # Setting the seed for bootstraps
-    #     pooled_sample = []
-    #     # TODO one way to potentially speed up code is to run this using Pool. Easy for parallel
-    #     # this is also the best target for optimization since it takes about ~85% of current run times
-
-    #     updated_network_list = []
-    #     updated_adj_matrix_list = []
-    #     updated_max_degree_list = []
-    #     for s in range(samples):                                    # For each of the *m* samples
-    #         g = df.copy()                                           # Create a copy of the data
-    #         if shift:
-    #             probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
-    #                                  p=p,                               # ... based on policy-assigned probabilities
-    #                                  size=g.shape[0])                   # ... for the N units
-    #         else:   
-    #             # New mechanism to apply quarantine
-    #             # print(f'Apply New Mechanism for Quarantine, mode {mode}, percent_candidates {percent_candidates}')
-    #             probs = self.select_candiate_nodes(data=g, 
-    #                                                mode=mode, percent_candidates=percent_candidates, 
-    #                                                pr_a=p, rng=rng)
-    #             # print(f'pooled probs: {probs}')
-    #         g[self.exposure] = np.where(g['__degree_flag__'] == 1,  # Restrict to appropriate degåree
-    #                                     g[self.exposure], probs)    # ... keeps restricted nodes as observed A_i
-
-    #         # Generating all summary measures based on the new exposure (could maybe avoid for all?)
-    #         g[self.exposure+'_sum'] = fast_exp_map(adj_matrix_list[s], np.array(g[self.exposure]), measure='sum')
-    #         g[self.exposure + '_mean'] = fast_exp_map(adj_matrix_list[s], np.array(g[self.exposure]), measure='mean')
-    #         g[self.exposure + '_mean'] = g[self.exposure + '_mean'].fillna(0)            # isolates should have mean=0
-    #         g[self.exposure + '_var'] = fast_exp_map(adj_matrix_list[s], np.array(g[self.exposure]), measure='var')
-    #         g[self.exposure + '_var'] = g[self.exposure + '_var'].fillna(0)              # isolates should have mean=0
-    #         g[self.exposure + '_mean_dist'] = fast_exp_map(adj_matrix_list[s],
-    #                                                        np.array(g[self.exposure]), measure='mean_dist')
-    #         g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-    #         g[self.exposure + '_var_dist'] = fast_exp_map(adj_matrix_list[s],
-    #                                                       np.array(g[self.exposure]), measure='var_dist')
-    #         g[self.exposure + '_mean_dist'] = g[self.exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-
-    #         # update network and adj_matrix based on the exposure policy for next time step
-    #         # update g for current time step 
-    #         edges_to_remove, network_current, g = self.get_edges_to_remove_and_update_exposure(g, network_list[s], self.exposure)
-    #         network_current, adj_matrix, _max_degree_ = self.update_graph_and_adj_matrix(edges_to_remove, network_current)
-
-    #         updated_network_list.append(network_current)
-    #         updated_adj_matrix_list.append(adj_matrix)
-    #         updated_max_degree_list.append(_max_degree_)
-
-    #         # Logic if no summary measure was specified (uses the complete factor approach)
-    #         if self._gs_measure_ is None:
-    #             network = network_list[s].copy()                                # Copy the network
-    #             a = np.array(g[self.exposure])                          # Transform A_i into array
-    #             for n in network.nodes():                               # For each node,
-    #                 network.nodes[n][self.exposure] = a[n]              # ...assign the new A_i*
-    #             df = exp_map_individual(network,                        # Now do the individual exposure maps with new
-    #                                     variable=self.exposure,
-    #                                     max_degree=_max_degree_list[s]).fillna(0)
-    #             for c in self._nonparam_cols_[-1]:                          # Adding back these np columns
-    #                 g[c] = df[c]
-
-    #         # Re-creating any threshold variables in the pooled sample data
-    #         if self._thresholds_any_:
-    #             create_threshold(data=g,
-    #                              variables=self._thresholds_variables_,
-    #                              thresholds=self._thresholds_,
-    #                              definitions=self._thresholds_def_)
-
-    #         # Re-creating any categorical variables in the pooled sample data
-    #         if self._categorical_any_:
-    #             create_categorical(data=g,
-    #                                variables=self._categorical_variables_,
-    #                                bins=self._categorical_,
-    #                                labels=self._categorical_def_,
-    #                                verbose=False)
-
-    #         g['_sample_id_'] = s         # Setting sample ID
-    #         pooled_sample.append(g)      # Adding to list (for later concatenate)
-
-    #     # Returning the pooled data set
-    #     return pd.concat(pooled_sample, axis=0, ignore_index=True), updated_network_list, updated_adj_matrix_list, updated_max_degree_list
+        # Returning the pooled data set
+        return pd.concat(pooled_sample, axis=0, ignore_index=True), updated_network_list, updated_adj_matrix_list, updated_max_degree_list
 
     # def _generate_pooled_sample_per_slice(self, df, network, _max_degree_, p, samples, seed):
     #     """
