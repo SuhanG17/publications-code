@@ -191,9 +191,13 @@ class TimeSeriesDatasetSeparateNormalize(Dataset):
     
     def _normlize_dataframe(self, dataframe, method='zscore'):
         if method == 'zscore':
-            return (dataframe - dataframe.mean())/dataframe.std()
+            normalized_df = (dataframe - dataframe.mean())/dataframe.std()
+            normalized_df = normalized_df.fillna(0) # fill NaN with 0 for summary measures can be empty under high proportion of treated
+            return normalized_df
         elif method == 'minmax':
-            return (dataframe - dataframe.min())/(dataframe.max() - dataframe.min())
+            normalized_df = (dataframe - dataframe.min())/(dataframe.max() - dataframe.min())
+            normalized_df = normalized_df.fillna(0)
+            return normalized_df
 
     def _column_name_to_index(self, dataframe, column_name):
         return dataframe.columns.get_indexer(column_name)

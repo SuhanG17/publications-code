@@ -199,6 +199,7 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 # Running simulation
 ########################################
 for i in range(n_mc):
+    print(f'+++++++++++++++++ simulation: {i} ++++++++++++++++++++')
     ######## inside for loop ########
     # Generating Data
     # H = vaccine_dgm(network=G, restricted=restrict)
@@ -365,12 +366,12 @@ for p in prop_treated:
 
 print("===========================")
 avg_df = pd.DataFrame.from_dict(avg_over_sims, orient='index')
-avg_df.to_csv("avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + ".csv", index=False)
+avg_df.to_csv("avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", index=False)
 
 ########################################
 # Saving results
 ########################################
-results.to_csv("results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + ".csv", index=False)
+results.to_csv("results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", index=False)
 
 
 # ########### TEST CODE START ##############

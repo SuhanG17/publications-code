@@ -339,25 +339,46 @@ def exposure_machine_learner(ml_model, xdata, ydata, pdata):
         raise ValueError("Currently custom_model must have 'predict' or 'predict_proba' attribute")
 
 
+# def targeting_step(y, q_init, ipw, verbose):
+#     r"""Estimate :math:`\eta` via the targeting model
+
+#     Parameters
+#     ----------
+#     y : array
+#         Observed outcome values.
+#     q_init : array
+#         Predicted outcome values under the observed values of exposure.
+#     ipw : array
+#         Estimated inverse probability weights.
+#     verbose : bool
+#         Whether to print the summary details of the targeting model.
+
+#     Returns
+#     -------
+#     float
+#         Estimated value to use to target the outcome model predictions
+#     """
+#     f = sm.families.family.Binomial()
+#     log = sm.GLM(y,  # Outcome / dependent variable
+#                  np.repeat(1, y.shape[0]),  # Generating intercept only model
+#                  offset=np.log(probability_to_odds(q_init)),  # Offset by g-formula predictions
+#                  freq_weights=ipw,  # Weighted by calculated IPW
+#                  family=f).fit(maxiter=500)
+
+#     if verbose:  # Optional argument to print each intermediary result
+#         print('==============================================================================')
+#         print('Targeting Model')
+#         print(log.summary())
+
+#     return log.params[0]  # Returns single-step estimated Epsilon term
+
 def targeting_step(y, q_init, ipw, verbose):
-    r"""Estimate :math:`\eta` via the targeting model
-
-    Parameters
-    ----------
-    y : array
-        Observed outcome values.
-    q_init : array
-        Predicted outcome values under the observed values of exposure.
-    ipw : array
-        Estimated inverse probability weights.
-    verbose : bool
-        Whether to print the summary details of the targeting model.
-
-    Returns
-    -------
-    float
-        Estimated value to use to target the outcome model predictions
-    """
+    """Remove observations if q_init has 1 values. which avoid zero division under probability_to_odds() """
+    y = y[q_init != 1]
+    ipw = ipw[q_init != 1]
+    q_init = q_init[q_init != 1]
+    print(f'Number of observations removed in the targeting step: {len(y) - len(y[q_init != 1])}')
+    
     f = sm.families.family.Binomial()
     log = sm.GLM(y,  # Outcome / dependent variable
                  np.repeat(1, y.shape[0]),  # Generating intercept only model
@@ -436,7 +457,7 @@ def tmle_unit_unbound(ystar, mini, maxi):
 #             label = v + '_t' + str(t)
 #         data[label] = np.where(data[v] > t, 1, 0)
 
-def create_threshold(data, variables, thresholds, definitions):
+def create_threshold(data, variables, thresholds, definitions, graph=None):
     """Internal function to create threshold variables given setup information.
 
     Parameters
@@ -460,9 +481,14 @@ def create_threshold(data, variables, thresholds, definitions):
         else:
             label = v + '_t' + str(t)
         data[label] = np.where(data[v + '_' + d] > t, 1, 0)
+        if graph is not None:
+            if nx.is_directed(graph):
+                raise NotImplementedError("Directed graph is not supported yet")
+            else:
+                nx.set_node_attributes(graph, dict(data[label]), label)
 
 
-def create_categorical(data, variables, bins, labels, verbose=False):
+def create_categorical(data, variables, bins, labels, verbose=False, graph=None):
     """
 
     Parameters
@@ -489,6 +515,11 @@ def create_categorical(data, variables, bins, labels, verbose=False):
                                  bins=b,
                                  labels=l,
                                  include_lowest=True).astype(float)
+        if graph is not None:
+            if nx.is_directed(graph):
+                raise NotImplementedError("Directed graph is not supported yet")
+            else:
+                nx.set_node_attributes(graph, dict(data[col_label]), col_label)
         if verbose:
             if np.any(data[col_label].isna()):
                 warnings.warn("It looks like some of your categories have missing values when being generated on the "
@@ -1073,7 +1104,7 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
 
 def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, T_in_id, T_out_id,
                             adj_matrix_list, cat_vars, cont_vars, cat_unique_levels, n_output_list, _continuous_outcome,
-                            predict_with_best=False, custom_path=None):
+                            predict_with_best=False, custom_path=None, finetune=False):
     """Internal function to fit custom_models for the outcome nuisance model.
 
     Parameters
@@ -1107,6 +1138,8 @@ def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, T_in_id, T_out
         if use the best model to predict, default is False
     custom_path: string
         path to saved best model, if different from model.save_path
+    finetune: bool
+        if true, finetune the current best model; otherwise, fit a untrained one
 
     Returns
     -------
@@ -1161,7 +1194,7 @@ def outcome_deep_learner_ts(deep_learner, xdata_list, ydata_list, T_in_id, T_out
         # Fitting model
         best_model_path = deep_learner.fit([xdata_list, ydata_array_list], T_in_id, T_out_id, pos_weight, class_weight,
                                            adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
-                                           n_output_final, _continuous_outcome, custom_path=custom_path)
+                                           n_output_final, _continuous_outcome, custom_path=custom_path, finetune=finetune)
 
     # Generating predictions
     pred = deep_learner.predict([xdata_list, ydata_array_list], T_in_id, T_out_id, pos_weight, class_weight,

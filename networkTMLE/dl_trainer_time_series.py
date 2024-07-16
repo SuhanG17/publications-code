@@ -36,7 +36,7 @@ class AbstractMLTS:
 
     def fit(self, xy_list, T_in_id=[*range(10)], T_out_id=[*range(10)], pos_weight=1, class_weight=None,
             adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
-            n_output=2, _continuous_outcome=False, custom_path=None):
+            n_output=2, _continuous_outcome=False, custom_path=None, finetune=False):
         # initiate weights for class imbalance for loss functions
         self.pos_weight = pos_weight
         self.class_weight = class_weight
@@ -56,7 +56,10 @@ class AbstractMLTS:
                                        n_output, _continuous_outcome).to(self.device)
         self.optimizer = self._optimizer()
         self.criterion = self._loss_fn()
-        self._save_model(custom_path) # save the untrained model to custom_path
+        if finetune:
+            self._load_model(custom_path) # load the pre-trained model
+        else:
+            self._save_model(custom_path) # save the untrained model to custom_path
 
         # target is exposure for nuisance models, outcome for outcome model
         if self._continuous_outcome:
@@ -350,6 +353,7 @@ class AbstractMLTS:
                 # send to device
                 x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device) 
                 sample_idx = sample_idx.to(self.device) 
+                
                 outputs = self.model(x_cat, x_cont, sample_idx) # shape [batch_size, num_classes, T_out] 
                 
                 if return_pred:

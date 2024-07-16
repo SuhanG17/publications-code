@@ -4,6 +4,7 @@
 *.egg-info
 .idea
 *.pth
+*.pt
 *.txt
 *.log
 *.pid
