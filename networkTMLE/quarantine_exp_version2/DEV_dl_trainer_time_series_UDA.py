@@ -1,12 +1,5 @@
 '''
-CAVEAT
-
-None of the independent variables involved in the forecasting task has changed over time.
-Only variables that are time-varying are D, I and R.  
-But, D is the dependent variable, and I, R should only be known from simulation not real epidemic.
-Time Series Version should not be used, because the input is the same along the time-axis.
-
-TODO: add a time-varing variable to the network.
+Deep Learning trainer with UDA mechanism
 '''
 import torch
 import torch.nn as nn
@@ -29,7 +22,7 @@ from dl_layers import ReverseLayerF
 class MLPModelTimeSeriesNumericalUDA(nn.Module):
     def __init__(self, adj_matrix_list, model_cat_unique_levels, n_cont, T_in=10, T_out=10,
                  n_output=2, _continuous_outcome=False, 
-                 lin_hidden=None, lin_hidden_temporal=None, domain_classifier=None):
+                 lin_hidden=None, lin_hidden_temporal=None, class_classifier=None, domain_classifier=None):
         super(MLPModelTimeSeriesNumericalUDA, self).__init__()
         n_cat = len(model_cat_unique_levels)
         n_input = n_cat + n_cont
@@ -40,10 +33,7 @@ class MLPModelTimeSeriesNumericalUDA(nn.Module):
         else:
             self.lin_hidden = nn.ModuleList([nn.Linear(32, 128), nn.Linear(128, 512), 
                                              nn.Linear(512, 128), nn.Linear(128, 32)])
-        if _continuous_outcome:
-            self.lin_output = nn.Linear(32, 1) 
-        else:
-            self.lin_output = nn.Linear(32, n_output)
+        lin_hidden_out_features = self.lin_hidden[-1].out_features
         
         # temporal dim
         if T_in > 1: # T_in > 1 and T_out >= 1
@@ -56,15 +46,27 @@ class MLPModelTimeSeriesNumericalUDA(nn.Module):
         else: # T_in = 1 and T_out = 1
             self.lin_input_temporal = None
             self.lin_output_temporal = None
-
+        
+        # class classifier
+        if class_classifier is not None:
+            self.class_classifier = class_classifier
+        else:
+            if T_in > 1:
+                self.class_classifier = nn.Linear(lin_hidden_out_features, n_output) 
+            else:
+                if _continuous_outcome:
+                    self.class_classifier = nn.Linear(lin_hidden_out_features, 1) 
+                else:
+                    self.class_classifier = nn.Linear(lin_hidden_out_features, n_output) 
+        
         # domain classifier
         if domain_classifier is not None:
             self.domain_classifier = domain_classifier
         else:
             if T_in > 1:
-                self.domain_classifier = nn.Linear(128*n_output, 2)
+                self.domain_classifier = nn.Linear(T_out*lin_hidden_out_features, 2) 
             else:
-                self.domain_classifier = nn.Linear(32*n_output, 2)
+                self.domain_classifier = nn.Linear(T_in*lin_hidden_out_features, 2) 
 
         self._init_weights()
 
@@ -89,37 +91,63 @@ class MLPModelTimeSeriesNumericalUDA(nn.Module):
         x1, x2 = x_cat.permute(0, 2, 1), x_cont.permute(0, 2, 1) 
         x =  torch.cat([x1, x2], -1) # -> [batch_size, T_in, num_cat_vars + num_cont_vars]
 
+        # feature dim
         x = F.relu(self.lin_input(x))
         for layer in self.lin_hidden:
-            x = F.relu(layer(x))
-        class_output = self.lin_output(x) # -> [batch_size, T_in, 1]
+            x = F.relu(layer(x)) # -> [batch_size, T_in, lin_hidden[-1]]
         
-        if self.lin_input_temporal is not None:
-            x = F.relu(self.lin_input_temporal(class_output.permute(0, 2, 1))) # -> [batch_size, 1, 128]
+        if self.lin_input_temporal is not None: # temporal dim
+            x = F.relu(self.lin_input_temporal(x.permute(0, 2, 1))) # -> [batch_size, lin_hidden[-1], 128]
             if self.lin_hidden_temporal is not None:
                 for layer in self.lin_hidden_temporal:
                     x = F.relu(layer(x))
-            
-            class_output = self.lin_output_temporal(x) # -> [batch_size, 1, T_out]
-
-            batch_size, feature_dim, temporal_dim = x.shape
-            x = x.view(batch_size, feature_dim*temporal_dim)
+            x = self.lin_output_temporal(x).permute(0, 2, 1) # -> [batch_size, T_out, lin_hidden[-1]]
+            # class classifier
+            class_output = self.class_classifier(x).permute(0, 2, 1) # -> [batch_size, n_output, T_out]
+            # domain classifier
+            batch_size, temporal_dim, feature_dim = x.shape
+            # print(f'batch_size: {batch_size}, temporal_dim: {temporal_dim}, feature_dim: {feature_dim}')
+            x = x.view(batch_size, temporal_dim*feature_dim)
             reverse_x = ReverseLayerF.apply(x, alpha)
-            domain_output = self.domain_classifier(reverse_x) # -> [batch_size, 1]
+            domain_output = self.domain_classifier(reverse_x) # -> [batch_size, 2]
             return class_output, domain_output
         else:
-            batch_size, feature_dim, temporal_dim = x.shape
-            x = x.view(batch_size, feature_dim*temporal_dim) 
+            # class classifier
+            class_output = self.class_classifier(x).permute(0, 2, 1) # -> [batch_size, n_output, T_in]
+            # domain classifier
+            batch_size, temporal_dim, feature_dim = x.shape
+            # print(f'batch_size: {batch_size}, temporal_dim: {temporal_dim}, feature_dim: {feature_dim}')
+            x = x.view(batch_size, temporal_dim*feature_dim) 
             reverse_x = ReverseLayerF.apply(x, alpha)
-            domain_output = self.domain_classifier(reverse_x) 
-            return class_output.permute(0, 2, 1), domain_output # -> [batch_size, 1, 1], [batch_size, 1]
+            domain_output = self.domain_classifier(reverse_x) # -> [batch_size, 2] 
+            return class_output, domain_output 
+
+batch_size = 8
+num_cat_vars = 4
+num_cont_vars = 5
+T_in = 4
+T_out = 1
+dummy_x_cat = torch.randn(batch_size, num_cat_vars, T_in)
+dummy_x_cont = torch.randn(batch_size, num_cont_vars, T_in)
+
+tmp_net = MLPModelTimeSeriesNumericalUDA(adj_matrix_list=None, model_cat_unique_levels={key:1 for key in range(4)},
+                                         n_cont=5, T_in=T_in, T_out=T_out, n_output=2, _continuous_outcome=False,
+                                         lin_hidden=None,
+                                         lin_hidden_temporal=None,
+                                         class_classifier=None,
+                                         domain_classifier=None)
+
+class_outputs, domain_outputs = tmp_net(dummy_x_cat, dummy_x_cont, alpha=0.5)
+
+class_outputs.shape
+domain_outputs.shape
 
 
 
 class MLPTS_UDA:
     def __init__(self, split_ratio, batch_size, shuffle, n_splits, predict_all,
                  epochs, print_every, device='cpu', save_path='./',
-                 lin_hidden=None, lin_hidden_temporal=None, domain_classifier=None):
+                 lin_hidden=None, lin_hidden_temporal=None, class_classifier=None, domain_classifier=None):
         super(MLPTS_UDA, self).__init__()
         # set up epochs and save path
         self.epochs = epochs
@@ -134,11 +162,12 @@ class MLPTS_UDA:
         # set up model params
         self.lin_hidden = lin_hidden
         self.lin_hidden_temporal = lin_hidden_temporal
+        self.class_classifier = class_classifier
         self.domain_classifier = domain_classifier
 
     def fit(self, src_xy_list, trg_xy_list, T_in_id=[*range(10)], T_out_id=[*range(10)], class_weight=None,
             adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
-            n_output=2, _continuous_outcome=False, custom_path=None, finetune=False):
+            n_output=2, _continuous_outcome=False, custom_path=None):
         
         # calculate T_in and T_out for _build_model()
         self.T_in = len(T_in_id)
@@ -156,19 +185,6 @@ class MLPTS_UDA:
         self.optimizer = self._optimizer()
         self.criterion_class = self._loss_fn(_continuous_outcome=_continuous_outcome, class_weight=class_weight)
         self.criterion_domain = self._loss_fn(_continuous_outcome=False, class_weight=None)
-        if finetune:
-            self._load_model(custom_path) # load the pre-trained model
-        else:
-            self._save_model(custom_path) # save the untrained model to custom_path
-
-        # target is exposure for nuisance models, outcome for outcome model
-        if self._continuous_outcome:
-            fold_record = {'train_loss': [], 'val_loss': [],
-                           'train_mae':  [], 'val_mae':  [],
-                           'train_mse':  [], 'val_mse':  [],
-                           'train_rmse': [], 'val_rmse': []}
-        else:
-            fold_record = {'train_loss': [], 'val_loss': [],'train_acc':[],'val_acc':[]}
         
         if self.n_splits > 1:
             raise NotImplementedError('Kfold cross validation is not implemented yet.')
@@ -187,48 +203,114 @@ class MLPTS_UDA:
                                                                                         normalize=True,
                                                                                         drop_duplicates=False,
                                                                                         T_in_id=T_in_id, T_out_id=T_out_id)
+            best_loss = np.inf
             for epoch in range(self.epochs):
                 print(f'============================= Epoch {epoch + 1}: Training =============================')
                 len_dataloader = min(len(src_train_loader), len(trg_train_loader))
                 data_source_iter = iter(src_train_loader)
                 data_target_iter = iter(trg_train_loader)
-                self.train_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
-                # loss_train, metrics_train = self.train_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
+                train_trg_label_loss = self.train_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
                 print()
-
-                print(f'============================= Epoch {epoch + 1}: Validation =============================')
-                len_dataloader = min(len(src_valid_loader), len(trg_valid_loader))
-                data_source_iter = iter(src_valid_loader)
-                data_target_iter = iter(trg_valid_loader)
-                self.valid_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
-                print()
+                
+                if src_valid_loader is not None:
+                    print(f'============================= Epoch {epoch + 1}: Validation =============================')
+                    len_dataloader = min(len(src_valid_loader), len(trg_valid_loader))
+                    data_source_iter = iter(src_valid_loader)
+                    data_target_iter = iter(trg_valid_loader)
+                    self.valid_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
+                    print()
             
                 print(f'============================= Epoch {epoch + 1}: Test =============================')
                 len_dataloader = min(len(src_test_loader), len(trg_test_loader))
                 data_source_iter = iter(src_test_loader)
                 data_target_iter = iter(trg_test_loader)
-                self.test_epoch(epoch, len_dataloader, data_source_iter, data_target_iter, return_pred=False)
+                test_trg_label_loss = self.test_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
                 print()
+
+                print(f'Epoch {epoch + 1}: train_trg_label_loss: {train_trg_label_loss:.3f}, test_trg_label_loss: {test_trg_label_loss:.3f}')
+
+                if test_trg_label_loss < best_loss:
+                    best_loss = test_trg_label_loss
+                    # self._save_model(custom_path=custom_path)
+                    # print('Best model updated')
+                
+                self._save_model(custom_path=custom_path)
+                print('Best model updated')
+        if custom_path is None:
+            return self.save_path
+        else:
+            return custom_path
                     
 
-    def predict():
-        pass
+    def predict(self, xy_list, T_in_id=[*range(10)], T_out_id=[*range(10)], class_weight=None,
+                adj_matrix_list=None, model_cat_vars=[], model_cont_vars=[], model_cat_unique_levels={}, 
+                n_output=2, _continuous_outcome=False, custom_path=None):
+        print(f'============================= Predicting =============================')
+        # initiate weights for class imbalance for loss functions
+        self.pos_weight = pos_weight
+        self.class_weight = class_weight 
+
+        # calculate T_in and T_out for _build_model()
+        self.T_in = len(T_in_id)
+        self.T_out = len(T_out_id)
+
+        # instantiate model
+        self.n_output = n_output
+        self._continuous_outcome = _continuous_outcome
+
+        self.model = self._build_model(adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels,
+                                       n_output, _continuous_outcome).to(self.device)
+        self._load_model(custom_path)
+        self.criterion_class = self._loss_fn(_continuous_outcome=_continuous_outcome, class_weight=class_weight)
+        # self.criterion_domain = self._loss_fn(_continuous_outcome=False, class_weight=None)
+
+        if self.predict_all:
+            dset = TimeSeriesDatasetSeparateNormalize(xy_list,
+                                                      model_cat_vars=model_cat_vars, 
+                                                      model_cont_vars=model_cont_vars, 
+                                                      model_cat_unique_levels=model_cat_unique_levels,
+                                                      normalize=True,
+                                                      drop_duplicates=False,
+                                                      T_in_id=T_in_id, T_out_id=T_out_id)
+            test_loader = get_predict_loader(dset, self.batch_size)
+        else:
+            _, _, test_loader = self._data_preprocess(xy_list,
+                                                      model_cat_vars=model_cat_vars, 
+                                                      model_cont_vars=model_cont_vars, 
+                                                      model_cat_unique_levels=model_cat_unique_levels,
+                                                      normalize=True,
+                                                      drop_duplicates=False,
+                                                      T_in_id=T_in_id, T_out_id=T_out_id)
+
+        self.model.eval()
+        alpha = 0
+        running_acc = 0.
+        pred_list = []
+        test_iter = iter(test_loader) 
+        with torch.no_grad():
+            for i in range(len(test_loader)):
+                data = test_iter.next()
+                x_cat, x_cont, y, sample_idx = data
+                x_cat, x_cont, y = x_cat.to(self.device), x_cont.to(self.device), y.to(self.device)
+                sample_idx = sample_idx.to(self.device)
+                class_outputs, _ = self.model(x_cat, x_cont, sample_idx, alpha)
+                y = self._reshape_target(y)
+                loss = self.criterion_class(class_outputs, y)
+                metrics = self._metrics_ts(class_outputs, y)
+                running_acc += metrics
+                print(f'predict iter: [{i}/{len(test_loader)}], label loss: {loss:.3f}, label acc: {metrics:.3f}', flush=True)
+
+                if self._continuous_outcome:
+                    pred_list.append(class_outputs.detach().to('cpu').numpy())
+                else:
+                    pred_list.append(torch.softmax(class_outputs, dim=1).detach().to('cpu').numpy())    
+            print(f'overall acc: {running_acc/len(test_loader):.3f}', flush=True)    
+        return pred_list
 
     def train_epoch(self, epoch, len_dataloader, data_source_iter, data_target_iter):
         self.model.train() # turn on train-mode
 
-        # # record loss and metrics for every print_every mini-batches
-        # running_loss = 0.0 
-        # if self._continuous_outcome:
-        #     running_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
-        # else:
-        #     running_metrics = 0.0
-        # # record loss and metrics for the whole epoch
-        # cumu_loss = 0.0 
-        # if self._continuous_outcome:
-        #     cumu_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
-        # else:
-        #     cumu_metrics = 0.0
+        trg_label_loss = 0.
         
         for i in range(len_dataloader):
 
@@ -280,6 +362,8 @@ class MLPTS_UDA:
             trg_y = self._reshape_target(trg_y)
             trg_loss_class = self.criterion_class(trg_class_outputs, trg_y)
             trg_loss_domain = self.criterion_domain(domain_outputs, domain_label)
+            trg_label_loss += trg_loss_class # TODO
+
             loss = src_loss_class + src_loss_domain + trg_loss_domain
 
             # backward + optimize
@@ -289,71 +373,20 @@ class MLPTS_UDA:
             # calculate domain metrics (2/2)
             domain_metrics_1 = self._metrics(domain_outputs, domain_label, _continuous_outcome=False)
 
-            print(f'train epoch: [{epoch}], iter: [{i}/{len_dataloader}]')
-            print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')
-
-            # # update loss
-            # running_loss += loss.item()
-            # cumu_loss += loss.item()            
-
-            # update metrics
+            # calculate metrics
             metrics = self._metrics_ts(class_outputs, src_y)
             metrics_trg = self._metrics_ts(trg_class_outputs, trg_y)                
 
-            print(f'domain=0 acc: {domain_metrics_0}, domain=1 acc: {domain_metrics_1}, src_label acc: {metrics}')
-            print(f'trg_label acc: {metrics_trg}, trg_loss_class: {trg_loss_class.item():.3f}')
-
-
-
-        #     if self.print_per_time_slice_metrics and i % self.print_every == self.print_every - 1:
-        #         print(f'metrics for batch {i + 1}: train')
-        #         # metrics_list = []
-        #         for i in range(src_y.shape[-1]):
-        #             # metrics_list.append(self._metrics(outputs[:, :, i], y[..., i]))
-        #             print(f'time slice {i} / {src_y.shape[-1]}')
-        #             print(self._metrics(class_outputs[:, :, i], src_y[..., i]))        
-        #         print()   
-            
-        #     if self._continuous_outcome:
-        #         for metric_name, metric_value in metrics.items():
-        #             running_metrics[metric_name] += metric_value
-        #             cumu_metrics[metric_name] += metric_value
-        #     else:
-        #         running_metrics += metrics
-        #         cumu_metrics += metrics
-            
-        #     if i % self.print_every == self.print_every - 1:    # print every mini-batches
-        #         if self._continuous_outcome:
-        #             report_string = f'[{epoch + 1}, {i + 1:5d}] | loss: {running_loss / self.print_every:.3f}' 
-        #             for metric_name, metric_value in running_metrics.items():
-        #                 report_string += f' | {metric_name}: {metric_value / self.print_every:.3f}'
-        #             print(report_string)
-
-        #             running_loss = 0.0
-        #             running_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
-        #         else:
-        #             print(f'[{epoch + 1}, {i + 1:5d}] | loss: {running_loss / self.print_every:.3f} | acc: {running_metrics / self.print_every:.3f}')
-        #             running_loss = 0.0
-        #             running_metrics = 0.0           
-        
-        # if self._continuous_outcome:
-        #     for metric_name, metric_value in cumu_metrics.items():
-        #         cumu_metrics[metric_name] = metric_value / len_dataloader
-        #     return cumu_loss / len_dataloader, cumu_metrics
-        # else:
-        #     return cumu_loss / len_dataloader, cumu_metrics / len_dataloader
+            print(f'train epoch: [{epoch}], iter: [{i}/{len_dataloader}], alpha: {alpha:.3f}')
+            print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')   
+            print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src_label acc: {metrics:.3f}')
+            print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
+        return trg_label_loss / len_dataloader
             
 
     def valid_epoch(self, epoch, len_dataloader, data_source_iter, data_target_iter):
         self.model.eval() # turn on eval-mode
         alpha = 0
-
-        # # record loss and metrics for the whole epoch
-        # cumu_loss = 0.0 
-        # if self._continuous_outcome:
-        #     cumu_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
-        # else:
-        #     cumu_metrics = 0.0
         
         with torch.no_grad():
             for i in range(len_dataloader):
@@ -405,61 +438,20 @@ class MLPTS_UDA:
                 # calculate domain metrics (2/2)
                 domain_metrics_1 = self._metrics(domain_outputs, domain_label, _continuous_outcome=False)
 
-        #         # update loss
-        #         cumu_loss += loss.item()
-
-                # update metrics
+                # calculate metrics
                 metrics = self._metrics_ts(class_outputs, src_y)                
                 metrics_trg = self._metrics_ts(trg_class_outputs, trg_y)
 
                 print(f'val epoch: [{epoch}], iter: [{i}/{len_dataloader}]')
                 print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')
-                print(f'domain=0 acc: {domain_metrics_0}, domain=1 acc: {domain_metrics_1}, src label acc: {metrics}')
-                print(f'trg_label acc: {metrics_trg}, trg_loss_class: {trg_loss_class.item():.3f}')
+                print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src label acc: {metrics:.3f}')
+                print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
 
-
-                
-        #         if self.print_per_time_slice_metrics and i % self.print_every == self.print_every - 1:
-        #             print(f'metrics for batch {i + 1}: train')
-        #             # metrics_list = []
-        #             for i in range(src_y.shape[-1]):
-        #                 # metrics_list.append(self._metrics(outputs[:, :, i], y[..., i]))
-        #                 print(f'time slice {i} / {src_y.shape[-1]}')
-        #                 print(self._metrics(class_outputs[:, :, i], src_y[..., i]))        
-        #             print()   
-                
-        #         if self._continuous_outcome:
-        #             for metric_name, metric_value in metrics.items():
-        #                 cumu_metrics[metric_name] += metric_value
-        #         else:
-        #             cumu_metrics += metrics
-
-        #     if self._continuous_outcome:
-        #         report_string = f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(len_dataloader):.3f}'
-        #         for metric_name, metric_value in cumu_metrics.items():
-        #             report_string += f' | {metric_name}: {metric_value / len(len_dataloader):.3f}'
-        #         print(report_string) 
-        #     else:
-        #         print(f'[{epoch + 1}, {i + 1:5d}] | loss: {cumu_loss / len(len_dataloader):.3f} | acc: {cumu_metrics / len(len_dataloader):.3f}')
-            
-        # if self._continuous_outcome:
-        #     for metric_name, metric_value in cumu_metrics.items():
-        #         cumu_metrics[metric_name] = metric_value / len(len_dataloader)
-        #     return cumu_loss / len(len_dataloader), cumu_metrics
-        # else:
-        #     return cumu_loss / len(len_dataloader), cumu_metrics / len(len_dataloader)
-
-
-    def test_epoch(self, epoch, len_dataloader, data_source_iter, data_target_iter, return_pred=False):
+    def test_epoch(self, epoch, len_dataloader, data_source_iter, data_target_iter):
         self.model.eval() # turn on eval-mode
         alpha = 0
 
-        # # record loss and metrics for the whole epoch
-        # cumu_loss = 0.0 
-        # if self._continuous_outcome:
-        #     cumu_metrics = {'mae': 0.0, 'mse': 0.0, 'rmse': 0.0}
-        # else:
-        #     cumu_metrics = 0.0
+        trg_label_loss = 0.
         
         with torch.no_grad():
             for i in range(len_dataloader):
@@ -503,30 +495,30 @@ class MLPTS_UDA:
                 trg_loss_class = self.criterion_class(trg_class_outputs, trg_y)
                 trg_loss_domain = self.criterion_domain(domain_outputs, domain_label)
 
+                trg_label_loss += trg_loss_class # TODO
 
                 loss = src_loss_class + src_loss_domain + trg_loss_domain
 
                 # calculate domain metrics (2/2)
                 domain_metrics_1 = self._metrics(domain_outputs, domain_label, _continuous_outcome=False)
 
-        #         # update loss
-        #         cumu_loss += loss.item()
-
-                # update metrics
+                # calculate metrics
                 metrics = self._metrics_ts(class_outputs, src_y)
                 metrics_trg = self._metrics_ts(trg_class_outputs, trg_y)                
 
                 print(f'test epoch: [{epoch}], iter: [{i}/{len_dataloader}]')
                 print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')
-                print(f'domain=0 acc: {domain_metrics_0}, domain=1 acc: {domain_metrics_1}, src_label acc: {metrics}')
-                print(f'trg_label acc: {metrics_trg}, trg_loss_class: {trg_loss_class.item():.3f}')
+                print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src_label acc: {metrics:.3f}')
+                print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
+        return trg_label_loss / len_dataloader
 
     def _build_model(self, adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels,
                      n_output, _continuous_outcome):
         n_cont = len(model_cont_vars)
         net = MLPModelTimeSeriesNumericalUDA(adj_matrix_list, model_cat_unique_levels, n_cont, self.T_in, self.T_out,
                                              n_output, _continuous_outcome,
-                                             self.lin_hidden, self.lin_hidden_temporal, self.domain_classifier)
+                                             self.lin_hidden, self.lin_hidden_temporal, 
+                                             self.class_classifier, self.domain_classifier)
         if (self.device != 'cpu') and (torch.cuda.device_count() > 1):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             net = nn.DataParallel(net)
@@ -635,69 +627,8 @@ class MLPTS_UDA:
 
 
                          
-from tmle_utils import get_patsy_for_model_w_C, get_final_model_cat_cont_split, get_model_cat_cont_split_patsy_matrix, all_equal
-from sklearn.utils.class_weight import compute_class_weight
+from tmle_utils import get_patsy_for_model_w_C, get_final_model_cat_cont_split, get_model_cat_cont_split_patsy_matrix, all_equal, get_imbalance_weights
 import patsy
-
-def get_imbalance_weights(n_output_final, ydata_array_list, use_last_time_slice=False,
-                          imbalance_threshold=3., imbalance_upper_bound=5., default_lock=False):
-    ''' set weight against class imbalance
-    Parameters
-    ----------
-    n_output_final: int
-        number of classes for the outcome/exposure variables
-    ydata_array_list: list 
-        a list containing ydata_array, it can contain all time slices or a single time slice, aka the last one
-    use_last_time_slice: bool
-        use the num_zeros/num_ones odds from the last time slice as the deciding factor
-    imbalance_upper_bound: float
-        the upper bound for pos_weight, in case the calculated imaalance_odds is too high
-    imbalance_threshold: float
-        the threshold to correct for imbalance
-    default_lock: bool
-        if True, return default pos_weight=1. and class_weight=None, which means no weight correction
-
-    Ref:
-    https://medium.com/@zergtant/use-weighted-loss-function-to-solve-imbalanced-data-classification-problems-749237f38b75
-    
-    Returns:
-    --------
-    pos_weight: float
-        weight for positive class/negative class
-    class_weight: array
-        weight for each class if more than 2 classes
-    '''
-    pos_weight = 1.
-    class_weight = None
-
-    if default_lock:
-        return pos_weight, class_weight
-    
-    if use_last_time_slice:
-        ydata_array_concat = ydata_array_list[-1]
-    else:
-        ydata_array_concat = np.concatenate(ydata_array_list, 0)
-
-
-    if n_output_final == 2: # binary classification with BCEloss
-        imbalance_odds = (ydata_array_concat.shape[0] - ydata_array_concat.sum()) / ydata_array_concat.sum() # num_zeros / num_ones
-        print(f'imbalance_odds: {imbalance_odds} = ({ydata_array_concat.shape[0]} - {ydata_array_concat.sum()}) / {ydata_array_concat.sum()}')
-        if imbalance_odds > imbalance_threshold:
-            if imbalance_odds > imbalance_upper_bound:
-                pos_weight = imbalance_upper_bound
-            else:
-                pos_weight = imbalance_odds 
-            print(f'pos_weight: {pos_weight}')
-    else:
-        class_weight = compute_class_weight(class_weight="balanced", classes=np.unique(ydata_array_concat), y=ydata_array_concat)
-        max_min_odds = np.max(class_weight) / np.min(class_weight)
-        if max_min_odds < imbalance_threshold:
-            class_weight = None # if class balance is not severe, do not use class_weight
-        else:
-            print(f'class_weight: {class_weight}')   
-    
-    return pos_weight, class_weight
-
 
 def get_pred_df(model_string, model_outcome, 
                 df_list, T_in_id, T_out_id, cat_vars, cont_vars, cat_unique_levels):
@@ -772,13 +703,13 @@ T_in_id = [6, 7, 8, 9]
 T_out_id = [9]
 
 # Raw Data
-df_restricted_list = torch.load('df_restricted_list.pt')
-pooled_data_restricted_list = torch.load('pooled_data_restricted_list.pt')
+df_restricted_list = torch.load('tmp_pt/'+'df_restricted_list.pt')
+pooled_data_restricted_list = torch.load('tmp_pt/'+'pooled_data_restricted_list.pt')
 
 # Raw dict
-cat_vars = torch.load('cat_vars.pt')
-cont_vars = torch.load('cont_vars.pt')
-cat_unique_levels = torch.load('cat_unique_levels.pt')
+cat_vars = torch.load('tmp_pt/'+'cat_vars.pt')
+cont_vars = torch.load('tmp_pt/'+'cont_vars.pt')
+cat_unique_levels = torch.load('tmp_pt/'+'cat_unique_levels.pt')
 
 aa, bb, cc = get_pred_df(qn_model, outcome, df_restricted_list, T_in_id, T_out_id, cat_vars, cont_vars, cat_unique_levels)
 src_xdata_list, src_ydata_list = aa
@@ -794,36 +725,51 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 # device = 'cpu'
 print(device)
 
-deep_learner = MLPTS_UDA(split_ratio=[0.6, 0.2, 0.2], batch_size=16, shuffle=True, n_splits=1, predict_all=True,
-                         epochs=50, print_every=5, device=device, save_path='./tmp.pth',
+split_ratio = [0.8, 0.2]
+deep_learner = MLPTS_UDA(split_ratio=split_ratio, batch_size=16, shuffle=True, n_splits=1, predict_all=True,
+                         epochs=10, print_every=5, device=device, save_path='./tmp.pth',
                          lin_hidden=None, 
                          lin_hidden_temporal=nn.ModuleList([nn.Linear(128, 256), nn.Linear(256, 128)]), 
-                         domain_classifier=nn.Sequential(nn.Linear(128*2, 128), nn.ReLU(), 
-                                                          nn.Linear(128, 32), nn.ReLU(), 
-                                                          nn.Linear(32, 2)))
-deep_learner.fit(src_xy_list=[src_xdata_list, src_ydata_list], 
-                 trg_xy_list=[trg_xdata_list, trg_ydata_list], 
-                 T_in_id=T_in_id, T_out_id=T_out_id, class_weight=None,
-                 adj_matrix_list=None, 
-                 model_cat_vars=model_cat_vars_final, model_cont_vars=model_cont_vars_final, model_cat_unique_levels=model_cat_unique_levels_final, 
-                 n_output=2, _continuous_outcome=False, custom_path=None, finetune=False)
+                         class_classifier=nn.Sequential(nn.Linear(32, 16), nn.ReLU(),
+                                                        nn.Linear(16, 8), nn.ReLU(),
+                                                        nn.Linear(8, 2)),
+                         domain_classifier=nn.Sequential(nn.Linear(1*32, 16), nn.ReLU(), 
+                                                         nn.Linear(16, 8), nn.ReLU(), 
+                                                         nn.Linear(8, 2)))
 
+# deep_learner = MLPTS_UDA(split_ratio=split_ratio, batch_size=16, shuffle=True, n_splits=1, predict_all=True,
+#                          epochs=25, print_every=5, device=device, save_path='./tmp.pth',
+#                          lin_hidden=None, 
+#                          lin_hidden_temporal=None, 
+#                          class_classifier=None,
+#                          domain_classifier=None)
 
+path_to_model = deep_learner.fit(src_xy_list=[src_xdata_list, src_ydata_list], 
+                                trg_xy_list=[trg_xdata_list, trg_ydata_list], 
+                                T_in_id=T_in_id, T_out_id=T_out_id, class_weight=None,
+                                adj_matrix_list=None, 
+                                model_cat_vars=model_cat_vars_final, model_cont_vars=model_cont_vars_final, model_cat_unique_levels=model_cat_unique_levels_final, 
+                                n_output=2, _continuous_outcome=False, custom_path=None)
 
+pred = deep_learner.predict(xy_list=[src_xdata_list, src_ydata_list],
+                            T_in_id=T_in_id, T_out_id=T_out_id, class_weight=None,
+                            adj_matrix_list=None, 
+                            model_cat_vars=model_cat_vars_final, model_cont_vars=model_cont_vars_final, model_cat_unique_levels=model_cat_unique_levels_final, 
+                            n_output=2, _continuous_outcome=False, custom_path=None)
 
+pred = deep_learner.predict(xy_list=[trg_xdata_list, trg_ydata_list],
+                            T_in_id=T_in_id, T_out_id=T_out_id, class_weight=None,
+                            adj_matrix_list=None, 
+                            model_cat_vars=model_cat_vars_final, model_cont_vars=model_cont_vars_final, model_cat_unique_levels=model_cat_unique_levels_final, 
+                            n_output=2, _continuous_outcome=False, custom_path=None)
 
+deep_learner.model
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+epochs = 10
+len_dataloader = 25
+for epoch in range(epochs):
+    for i in range(len_dataloader):
+        p = float(i + epoch * len_dataloader) / epochs / len_dataloader
+        alpha = 2. / (1. + np.exp(-10 * p)) - 1
+        print(f'epoch: {epoch}, iter: {i}, p: {p:.3f}, alpha: {alpha:.3f}')
 
