@@ -71,13 +71,14 @@ class MLPTS_UDA:
                                                                                         normalize=True,
                                                                                         drop_duplicates=False,
                                                                                         T_in_id=T_in_id, T_out_id=T_out_id)
-            best_loss = np.inf
+            best_trg_label_loss = np.inf
+            best_trg_label_acc = 0.
             for epoch in range(self.epochs):
                 print(f'============================= Epoch {epoch + 1}: Training =============================')
                 len_dataloader = min(len(src_train_loader), len(trg_train_loader))
                 data_source_iter = iter(src_train_loader)
                 data_target_iter = iter(trg_train_loader)
-                train_trg_label_loss = self.train_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
+                train_src_recorder, train_trg_recorder = self.train_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
                 print()
                 
                 if src_valid_loader is not None:
@@ -92,18 +93,23 @@ class MLPTS_UDA:
                 len_dataloader = min(len(src_test_loader), len(trg_test_loader))
                 data_source_iter = iter(src_test_loader)
                 data_target_iter = iter(trg_test_loader)
-                test_trg_label_loss = self.test_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
+                test_src_recorder, test_trg_recorder = self.test_epoch(epoch, len_dataloader, data_source_iter, data_target_iter)
                 print()
 
-                print(f'Epoch {epoch + 1}: train_trg_label_loss: {train_trg_label_loss:.3f}, test_trg_label_loss: {test_trg_label_loss:.3f}')
+                print(f'Epoch {epoch + 1}:')
+                print('train_src_label_acc: {:.3f}, test_src_label_acc: {:.3f}'.format(train_src_recorder['src_label_acc'], test_src_recorder['src_label_acc']))
+                print('train_trg_label_acc: {:.3f}, test_trg_label_acc: {:.3f}'.format(train_trg_recorder['trg_label_acc'], test_trg_recorder['trg_label_acc']))
+                print('train_src_domain_acc: {:.3f}, test_src_domain_acc: {:.3f}'.format(train_src_recorder['src_domain_acc'], test_src_recorder['src_domain_acc']))
+                print('train_trg_domain_acc: {:.3f}, test_trg_domain_acc: {:.3f}'.format(train_trg_recorder['trg_domain_acc'], test_trg_recorder['trg_domain_acc']))
 
-                if test_trg_label_loss < best_loss:
-                    best_loss = test_trg_label_loss
-                    # self._save_model(custom_path=custom_path)
-                    # print('Best model updated')
-                
-                self._save_model(custom_path=custom_path)
-                print('Best model updated')
+                if test_trg_recorder['trg_label_acc'] > best_trg_label_acc:
+                    best_trg_label_acc = test_trg_recorder['trg_label_acc']
+                    self._save_model(custom_path=custom_path)
+                    print('Best model updated')
+
+                # # naive save per epoch 
+                # self._save_model(custom_path=custom_path)
+                # print('Best model updated')
         if custom_path is None:
             return self.save_path
         else:
@@ -169,7 +175,7 @@ class MLPTS_UDA:
 
                 if self._continuous_outcome:
                     pred_list.append(class_outputs.detach().to('cpu').numpy())
-                else:
+                else: 
                     pred_list.append(torch.softmax(class_outputs, dim=1).detach().to('cpu').numpy())    
             print(f'overall acc: {running_acc/len(test_loader):.3f}', flush=True)    
         return pred_list
@@ -177,7 +183,8 @@ class MLPTS_UDA:
     def train_epoch(self, epoch, len_dataloader, data_source_iter, data_target_iter):
         self.model.train() # turn on train-mode
 
-        trg_label_loss = 0.
+        src_recorder = {'src_label_loss': 0., 'src_label_acc': 0., 'src_domain_loss': 0., 'src_domain_acc': 0.}
+        trg_recorder = {'trg_label_loss': 0., 'trg_label_acc': 0., 'trg_domain_loss': 0., 'trg_domain_acc': 0.}
         
         for i in range(len_dataloader):
 
@@ -229,7 +236,6 @@ class MLPTS_UDA:
             trg_y = self._reshape_target(trg_y)
             trg_loss_class = self.criterion_class(trg_class_outputs, trg_y)
             trg_loss_domain = self.criterion_domain(domain_outputs, domain_label)
-            trg_label_loss += trg_loss_class # TODO
 
             loss = src_loss_class + src_loss_domain + trg_loss_domain
 
@@ -244,11 +250,26 @@ class MLPTS_UDA:
             metrics = self._metrics_ts(class_outputs, src_y)
             metrics_trg = self._metrics_ts(trg_class_outputs, trg_y)                
 
-            print(f'train epoch: [{epoch}], iter: [{i}/{len_dataloader}], alpha: {alpha:.3f}')
-            print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')   
-            print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src_label acc: {metrics:.3f}')
-            print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
-        return trg_label_loss / len_dataloader
+            if i % self.print_every == 0:
+                print(f'train epoch: [{epoch}], iter: [{i}/{len_dataloader}], alpha: {alpha:.3f}')
+                print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')   
+                print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src_label acc: {metrics:.3f}')
+                print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
+            
+            # update loss and metrics
+            src_recorder['src_label_loss'] += src_loss_class.item()
+            src_recorder['src_label_acc'] += metrics
+            src_recorder['src_domain_loss'] += src_loss_domain.item()
+            src_recorder['src_domain_acc'] += domain_metrics_0
+            trg_recorder['trg_label_loss'] += trg_loss_class.item()
+            trg_recorder['trg_label_acc'] += metrics_trg
+            trg_recorder['trg_domain_loss'] += trg_loss_domain.item()
+            trg_recorder['trg_domain_acc'] += domain_metrics_1
+        
+        src_recorder = {k: v / len_dataloader for k, v in src_recorder.items()}
+        trg_recorder = {k: v / len_dataloader for k, v in trg_recorder.items()}
+
+        return src_recorder, trg_recorder
             
 
     def valid_epoch(self, epoch, len_dataloader, data_source_iter, data_target_iter):
@@ -318,7 +339,8 @@ class MLPTS_UDA:
         self.model.eval() # turn on eval-mode
         alpha = 0
 
-        trg_label_loss = 0.
+        src_recorder = {'src_label_loss': 0., 'src_label_acc': 0., 'src_domain_loss': 0., 'src_domain_acc': 0.}
+        trg_recorder = {'trg_label_loss': 0., 'trg_label_acc': 0., 'trg_domain_loss': 0., 'trg_domain_acc': 0.}
         
         with torch.no_grad():
             for i in range(len_dataloader):
@@ -362,8 +384,6 @@ class MLPTS_UDA:
                 trg_loss_class = self.criterion_class(trg_class_outputs, trg_y)
                 trg_loss_domain = self.criterion_domain(domain_outputs, domain_label)
 
-                trg_label_loss += trg_loss_class # TODO
-
                 loss = src_loss_class + src_loss_domain + trg_loss_domain
 
                 # calculate domain metrics (2/2)
@@ -373,11 +393,25 @@ class MLPTS_UDA:
                 metrics = self._metrics_ts(class_outputs, src_y)
                 metrics_trg = self._metrics_ts(trg_class_outputs, trg_y)                
 
-                print(f'test epoch: [{epoch}], iter: [{i}/{len_dataloader}]')
-                print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')
-                print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src_label acc: {metrics:.3f}')
-                print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
-        return trg_label_loss / len_dataloader
+                if i % self.print_every == 0:
+                    print(f'test epoch: [{epoch}], iter: [{i}/{len_dataloader}], alpha: {alpha:.3f}')
+                    print(f'src_loss_class: {src_loss_class.item():.3f}, src_loss_domain: {src_loss_domain.item():.3f}, trg_loss_domain: {trg_loss_domain.item():.3f}')
+                    print(f'domain=0 acc: {domain_metrics_0:.3f}, domain=1 acc: {domain_metrics_1:.3f}, src_label acc: {metrics:.3f}')
+                    print(f'trg_label acc: {metrics_trg:.3f}, trg_loss_class: {trg_loss_class.item():.3f}')
+                
+                # update loss and metrics
+                src_recorder['src_label_loss'] += src_loss_class.item()
+                src_recorder['src_label_acc'] += metrics
+                src_recorder['src_domain_loss'] += src_loss_domain.item()
+                src_recorder['src_domain_acc'] += domain_metrics_0
+                trg_recorder['trg_label_loss'] += trg_loss_class.item()
+                trg_recorder['trg_label_acc'] += metrics_trg
+                trg_recorder['trg_domain_loss'] += trg_loss_domain.item()
+                trg_recorder['trg_domain_acc'] += domain_metrics_1
+        
+        src_recorder = {k: v / len_dataloader for k, v in src_recorder.items()}
+        trg_recorder = {k: v / len_dataloader for k, v in trg_recorder.items()}
+        return src_recorder, trg_recorder
 
     def _build_model(self, adj_matrix_list, model_cat_vars, model_cont_vars, model_cat_unique_levels,
                      n_output, _continuous_outcome):

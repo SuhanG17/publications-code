@@ -1153,7 +1153,16 @@ def outcome_deep_learner_ts(deep_learner, src_xdata_list, src_ydata_list, trg_xd
     """
     # slicing xdata and ydata list
     src_xdata_list, src_ydata_list = [src_xdata_list[i] for i in T_in_id], [src_ydata_list[i] for i in T_out_id]
-    trg_xdata_list, trg_ydata_list = [trg_xdata_list[i] for i in T_in_id], [trg_ydata_list[i] for i in T_out_id]
+    trg_xdata_list_full, trg_ydata_list_full = [trg_xdata_list[i] for i in T_in_id], [trg_ydata_list[i] for i in T_out_id]
+
+    # slice pooled data to match the observed data
+    num_samples_in_src = src_xdata_list[0].shape[0]
+    num_samples_in_trg = trg_xdata_list[0].shape[0]
+    print(f'num_samples_in_src: {num_samples_in_src}, num_samples_in_trg: {num_samples_in_trg}')
+    if num_samples_in_src != num_samples_in_trg:
+        trg_xdata_list = [df[:num_samples_in_src] for df in trg_xdata_list_full]
+        trg_ydata_list = [df[:num_samples_in_src] for df in trg_ydata_list_full]
+
 
     # Re-arrange data
     model_cat_vars_list = []
@@ -1182,6 +1191,7 @@ def outcome_deep_learner_ts(deep_learner, src_xdata_list, src_ydata_list, trg_xd
     for src_ydata, trg_ydata in zip(src_ydata_list, trg_ydata_list):
         src_ydata_array_list.append(src_ydata.to_numpy()) # convert pd.series to np.array
         trg_ydata_array_list.append(trg_ydata.to_numpy()) # convert pd.series to np.array
+    trg_ydata_array_list_full =[df.to_numpy() for df in trg_ydata_list_full]
     
     model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final = get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, model_cat_unique_levels_list)
 
@@ -1206,7 +1216,8 @@ def outcome_deep_learner_ts(deep_learner, src_xdata_list, src_ydata_list, trg_xd
     pred_src = deep_learner.predict([src_xdata_list, src_ydata_array_list], T_in_id, T_out_id, class_weight,
                                      adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
                                      n_output=n_output_final, _continuous_outcome=_continuous_outcome, custom_path=custom_path)
-    pred_trg = deep_learner.predict([trg_xdata_list, trg_ydata_array_list], T_in_id, T_out_id, class_weight,
+    # generate predictions for all trg data, not just the trained ones
+    pred_trg = deep_learner.predict([trg_xdata_list_full, trg_ydata_array_list_full], T_in_id, T_out_id, class_weight,
                                      adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final,
                                      n_output=n_output_final, _continuous_outcome=_continuous_outcome, custom_path=custom_path)
     pred_src, pred_trg = np.concatenate(pred_src, 0), np.concatenate(pred_trg, 0)
@@ -1214,7 +1225,7 @@ def outcome_deep_learner_ts(deep_learner, src_xdata_list, src_ydata_list, trg_xd
     if _continuous_outcome: # continuous outcome
         pred_src, pred_trg = pred_src.squeeze(1), pred_trg.squeeze(1) # [sample_size, 1, T] -> [sample_size, T]
         pred_src, pred_trg = pred_src[:, -1], pred_trg[:, -1] # only return the last time slice
-    elif n_output_final == 2: # binary classification with CrossEntropyLoss
+    elif n_output_final == 2: # binary classification with CrossEntropyLoss #TODO
         pred_src, pred_trg = pred_src[:, -1, -1], pred_trg[:, -1, -1]  
         # select the prob for class 1 and select the prob for last time slice
     else:

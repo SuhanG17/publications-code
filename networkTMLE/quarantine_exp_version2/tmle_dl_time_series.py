@@ -487,6 +487,25 @@ class NetworkTMLETimeSeries:
             if self.use_deep_learner_outcome:
                 self._q_custom_ = custom_model
                 print(f'Deep Learner will be trained in fit()')
+
+                # use LR model to find epsilon
+                if not self._continuous_outcome_list_[-1]:                     # and not continuous
+                    f = sm.families.family.Binomial()                          # ... use logit regression
+                elif distribution.lower() == 'normal':                         # or use distribution normal
+                    f = sm.families.family.Gaussian()                          # ... use OLS
+                elif distribution.lower() == 'poisson':                        # or use distribution poisson
+                    f = sm.families.family.Poisson()                           # ... use Poisson regression
+                else:                                                          # Otherwise error for not available
+                    raise ValueError("Distribution" +
+                                    str(distribution) +
+                                    " is not currently supported")
+
+                # Estimate outcome model and predicted Y with the observed network data
+                self._outcome_model = smf.glm(self.outcome + ' ~ ' + self._q_model,            # Specified model form
+                                            self.df_restricted_list[-1],                       # ... fit to restricted data
+                                            family=f).fit()                                    # ... for given GLM family
+                self._Qinit_ = self._outcome_model.predict(self.df_restricted_list[-1])        # Predict outcome values
+
             else:
                 # Extract data using the model
                 data = patsy.dmatrix(model + ' - 1',                              # Specified model WITHOUT an intercept
@@ -533,22 +552,25 @@ class NetworkTMLETimeSeries:
         # custom_path = 'outcome_' + self.outcome + '.pth'
         custom_path = 'outcome_' + self.outcome + '_' + self.task_string + '.pth'
         self._q_custom_ = custom_model
-        self._q_custom_path_, self._Qinit_, y_star = outcome_deep_learner_ts(custom_model, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
-                                                                             T_in_id, T_out_id,
-                                                                             self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
-                                                                             predict_with_best=False, custom_path=custom_path)
+        self._q_custom_path_, _, self.y_star = outcome_deep_learner_ts(custom_model, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
+                                                                       T_in_id, T_out_id,
+                                                                       self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
+                                                                       predict_with_best=False, custom_path=custom_path)
+        # self._q_custom_path_, self._Qinit_, self.y_star = outcome_deep_learner_ts(custom_model, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
+        #                                                                           T_in_id, T_out_id,
+        #                                                                           self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
+        #                                                                           predict_with_best=False, custom_path=custom_path)
 
-        # Ensures all predicted values are bounded: 
-        # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
-        if self._continuous_outcome_list_[-1]:
-            self._Qinit_ = np.where(self._Qinit_ < 0.,                              # When lower than lower bound
-                                    0 + self._cb_list_[-1],                         # ... set to lower bound
-                                    self._Qinit_)                                   # ... otherwise keep
-            self._Qinit_ = np.where(self._Qinit_ > 1.,                              # When above the upper bound
-                                    1 - self._cb_list_[-1],                         # ... set to upper bound
-                                    self._Qinit_)                                   # ... otherwise keep
-                
-        return y_star
+        # # Ensures all predicted values are bounded: 
+        # # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
+        # if self._continuous_outcome_list_[-1]:
+        #     self._Qinit_ = np.where(self._Qinit_ < 0.,                              # When lower than lower bound
+        #                             0 + self._cb_list_[-1],                         # ... set to lower bound
+        #                             self._Qinit_)                                   # ... otherwise keep
+        #     self._Qinit_ = np.where(self._Qinit_ > 1.,                              # When above the upper bound
+        #                             1 - self._cb_list_[-1],                         # ... set to upper bound
+        #                             self._Qinit_)                                   # ... otherwise keep
+
     
     def fit(self, p, samples=100, bound=None, seed=None,
             shift=False, mode='top', percent_candidates=0.3, quarantine_period=2, inf_duration=5,
@@ -613,6 +635,7 @@ class NetworkTMLETimeSeries:
                                                                                               inf_duration=inf_duration,
                                                                                               T_in_id=T_in_id, T_out_id=T_out_id)      
         # save for model test run, can be commented after test run
+        self.h_iptw = h_iptw
         self.pooled_data_restricted_list, self.pooled_adj_matrix_list = pooled_data_restricted_list, pooled_adj_matrix_list 
 
         # Saving some information for diagnostic procedures
@@ -626,23 +649,25 @@ class NetworkTMLETimeSeries:
         # so nothing to do here
         # dl model 
         if self.use_deep_learner_outcome: # train and pred in one run
-            y_star = self.outcome_model_UDA(model=self._q_model, custom_model=self._q_custom_, 
-                                            observed_data_list=self.df_restricted_list, pooled_data_list=pooled_data_restricted_list, 
-                                            T_in_id=T_in_id, T_out_id=T_out_id)
+            self.outcome_model_UDA(model=self._q_model, custom_model=self._q_custom_, 
+                                   observed_data_list=self.df_restricted_list, pooled_data_list=pooled_data_restricted_list, 
+                                   T_in_id=T_in_id, T_out_id=T_out_id)
         
         # Step 3) Target the parameter
+        # if self.use_deep_learner_outcome:  # use LR to find epsilon
         epsilon = targeting_step(y=self.df_restricted_list[-1][self.outcome],   # Estimate the targeting model given observed Y
                                  q_init=self._Qinit_,                           # ... predicted values of Y under observed A
                                  ipw=h_iptw,                                    # ... weighted by IPW
                                  verbose=self._verbose_)                        # ... with option for verbose info
+        print(f'epsilon: {epsilon}')
 
         # Step 4) Monte Carlo integration (old code did in loop but faster as vector)
         #
         # Generating outcome predictions under the policies (via pooled data sets)
         if self._q_custom_ is None:                                                     # If given a parametric default model
-            y_star = self._outcome_model.predict(pooled_data_restricted_list[-1])       # ... predict using statsmodels syntax
+            self.y_star = self._outcome_model.predict(pooled_data_restricted_list[-1])       # ... predict using statsmodels syntax
             label = pooled_data_restricted_list[-1][self.outcome]
-            pred_binary = np.round(y_star)
+            pred_binary = np.round(self.y_star)
             acc = (pred_binary == label).sum().item()/label.shape[0]
             print(f'Outcome model accuracy in pooled data: {acc}')
         else:  # Custom input model by user
@@ -650,27 +675,27 @@ class NetworkTMLETimeSeries:
                 pass
             else:
                 d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted_list[-1])  # ... extract data via patsy
-                y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,              # ... predict using custom function
+                self.y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,              # ... predict using custom function
                                                 xdata=np.asarray(d))                        # ... for the extracted data
         
             
         # Ensure all predicted values are bounded properly for continuous
         # SG modified: continous outcome is already normalized, should compare with 0,1, not with _continuous_min/max_
         if self._continuous_outcome_list_[-1]:
-            y_star = np.where(y_star < 0., 0. + self._cb_list_[-1], y_star)
-            y_star = np.where(y_star > 1., 1. - self._cb_list_[-1], y_star)     
+            self.y_star = np.where(self.y_star < 0., 0. + self._cb_list_[-1], self.y_star)
+            self.y_star = np.where(self.y_star > 1., 1. - self._cb_list_[-1], self.y_star)     
 
         # if self._continuous_outcome_list_[-1]:
-        #     y_star = np.where(y_star < self._continuous_min_list_[-1], self._continuous_min_list_[-1], y_star)
-        #     y_star = np.where(y_star > self._continuous_max_list_[-1], self._continuous_max_list_[-1], y_star)
+        #     self.y_star = np.where(self.y_star < self._continuous_min_list_[-1], self._continuous_min_list_[-1], self.y_star)
+        #     self.y_star = np.where(self.y_star > self._continuous_max_list_[-1], self._continuous_max_list_[-1], self.y_star)
 
         # Updating predictions via intercept from targeting step
         # # Article equation version, which is the same as described in the article, 
-        # # but probability_to_odd() and odds_to_probability() cannot handle zero division and create nans when y_star == 1
-        # logit_qstar = np.log(probability_to_odds(y_star)) + epsilon                         # NOTE: needs to be logit(Y^*) + e
+        # # but probability_to_odd() and odds_to_probability() cannot handle zero division and create nans when self.y_star == 1
+        # logit_qstar = np.log(probability_to_odds(self.y_star)) + epsilon                         # NOTE: needs to be logit(Y^*) + e
         # q_star = odds_to_probability(np.exp(logit_qstar))                                   # Back converting from odds
-        # Stablized version: handles zero division problem and when y_star contains one, the q_star will report 1 correspondingly
-        q_star = (y_star * np.exp(epsilon)) / (1 - y_star + y_star * np.exp(epsilon))
+        # Stablized version: handles zero division problem and when self.y_star contains one, the q_star will report 1 correspondingly
+        q_star = (self.y_star * np.exp(epsilon)) / (1 - self.y_star + self.y_star * np.exp(epsilon))
         # # if need to check the results of q_star equals, rename variable to q_star_eq and q_star_stable
         # where_they_differ = np.isclose(q_star_eq, q_star_stable).sum()
         # print(f'Two versions have {len(where_they_differ)} differences')
@@ -1823,354 +1848,3 @@ if __name__ == '_main__':
 
     tmle.fit(p=0.55, bound=0.01, seed=3407)
     tmle.summary()
-
-# pd.unique(tmle.df_restricted_list[1]['quarantine'])
-
-
-# pooled_data_restricted_list = []
-# for df, network, _max_degree_, df_restricted in zip(tmle.df_list, tmle.network_list, tmle._max_degree_list_, tmle.df_restricted_list):
-#     break
-#     pooled_df = self._generate_pooled_sample_per_slice(df=df,
-#                                                         network=network,
-#                                                         _max_degree_=_max_degree_,
-#                                                         p=p,                                      # Generate data under policy
-#                                                         samples=samples,                          # ... for m samples
-#                                                         seed=seed)                                # ... with a provided seed
-#     pooled_data_restricted = pooled_df.loc[pooled_df['__degree_flag__'] == 0].copy()             # Restricting pooled sample
-
-# def get_edges_to_remove_and_update_exposure(g, network, exposure):
-#     infected = g[g['I'] == 1].index
-#     exposed = g[g[exposure] == 1].index
-#     network_current = network.copy()
-
-#     edges_to_remove = []
-#     actually_exposed_contact = []
-#     for inf in infected:
-#         for contact in nx.neighbors(network_current, inf):
-#             if network_current.nodes[contact]["D"] == 1: # if nodes are already recoverd, pass
-#                 pass
-#             else: # apply quarantine
-#                 if contact in exposed:
-#                     edges_to_remove.append((inf, contact))
-#                     actually_exposed_contact.append(contact)
-    
-#     # Update exposure
-#     updated_exposure = np.where(g.index.isin(actually_exposed_contact), 1, 0)
-#     # restrict to the appropriate degree
-#     g[exposure] = np.where(g['__degree_flag__'] == 1, g[exposure], updated_exposure)
-
-#     return edges_to_remove, network_current, g
-
-# def update_graph_and_adj_matrix(edges_to_remove, network_current):
-#     network_current.remove_edges_from(edges_to_remove)
-#     adj_matrix = nx.adjacency_matrix(network_current, weight=None) 
-#     return network_current, adj_matrix
-
-
-# seed = 0
-# samples = 500
-# p = 0.55
-# exposure = 'quarantine'
-# adj_matrix_list = [tmle.adj_matrix_list[0] for _ in range(samples)]
-
-# # Prep for pooled data set creation
-# rng = np.random.default_rng(seed)  # Setting the seed for bootstraps
-# pooled_sample = []
-# # TODO one way to potentially speed up code is to run this using Pool. Easy for parallel
-# # this is also the best target for optimization since it takes about ~85% of current run times
-
-# updated_network_list = []
-# updated_adj_matrix_list = []
-# for s in range(samples):                                    # For each of the *m* samples
-#     g = df.copy()                                           # Create a copy of the data
-#     probs = rng.binomial(n=1,                               # Flip a coin to generate A_i
-#                          p=p,                               # ... based on policy-assigned probabilities
-#                          size=g.shape[0])                   # ... for the N units
-#     g[exposure] = np.where(g['__degree_flag__'] == 1,       # Restrict to appropriate degree
-#                            g[exposure], probs)              # ... keeps restricted nodes as observed A_i
-
-#     # Generating all summary measures based on the new exposure (could maybe avoid for all?)
-#     g[exposure+'_sum'] = fast_exp_map(adj_matrix_list[s], np.array(g[exposure]), measure='sum')
-#     g[exposure + '_mean'] = fast_exp_map(adj_matrix_list[s], np.array(g[exposure]), measure='mean')
-#     g[exposure + '_mean'] = g[exposure + '_mean'].fillna(0)            # isolates should have mean=0
-#     g[exposure + '_var'] = fast_exp_map(adj_matrix_list[s], np.array(g[exposure]), measure='var')
-#     g[exposure + '_var'] = g[exposure + '_var'].fillna(0)              # isolates should have mean=0
-#     g[exposure + '_mean_dist'] = fast_exp_map(adj_matrix_list[s],
-#                                                     np.array(g[exposure]), measure='mean_dist')
-#     g[exposure + '_mean_dist'] = g[exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-#     g[exposure + '_var_dist'] = fast_exp_map(adj_matrix_list[s],
-#                                                     np.array(g[exposure]), measure='var_dist')
-#     g[exposure + '_mean_dist'] = g[exposure + '_mean_dist'].fillna(0)  # isolates should have mean=0
-
-#     edges_to_remove, network_current, g = get_edges_to_remove_and_update_exposure(g, network, exposure)
-#     network_current, adj_matrix = update_graph_and_adj_matrix(edges_to_remove, network_current)
-
-#     updated_network_list.append(network_current)
-#     updated_adj_matrix_list.append(adj_matrix)
-
-#     # # Logic if no summary measure was specified (uses the complete factor approach)
-#     # if self._gs_measure_ is None:
-#     #     network = network.copy()                                # Copy the network
-#     #     a = np.array(g[exposure])                          # Transform A_i into array
-#     #     for n in network.nodes():                               # For each node,
-#     #         network.nodes[n][exposure] = a[n]              # ...assign the new A_i*
-#     #     df = exp_map_individual(network,                        # Now do the individual exposure maps with new
-#     #                             variable=exposure,
-#     #                             max_degree=_max_degree_).fillna(0)
-#     #     for c in self._nonparam_cols_[-1]:                          # Adding back these np columns
-#     #         g[c] = df[c]
-
-#     # # Re-creating any threshold variables in the pooled sample data
-#     # if self._thresholds_any_:
-#     #     create_threshold(data=g,
-#     #                         variables=self._thresholds_variables_,
-#     #                         thresholds=self._thresholds_,
-#     #                         definitions=self._thresholds_def_)
-
-#     # # Re-creating any categorical variables in the pooled sample data
-#     # if self._categorical_any_:
-#     #     create_categorical(data=g,
-#     #                         variables=self._categorical_variables_,
-#     #                         bins=self._categorical_,
-#     #                         labels=self._categorical_def_,
-#     #                         verbose=False)
-
-#     g['_sample_id_'] = s         # Setting sample ID
-#     pooled_sample.append(g)      # Adding to list (for later concatenate)
-
-# # Returning the pooled data set
-# pd.concat(pooled_sample, axis=0, ignore_index=True)
-
-
-# len(updated_adj_matrix_list)
-# len(updated_adj_matrix_list)
-
-
-# def _check_degree_restrictions_(bounds):
-#     """Checks degree restrictions are valid (and won't cause a later error).
-
-#     Parameters
-#     ----------
-#     bounds : list, set, array
-#         Specified degree bounds
-#     """
-#     if type(bounds) is not list and type(bounds) is not tuple:
-#         raise ValueError("`degree_restrict` should be a list/tuple of the upper and lower bounds")
-#     if len(bounds) != 2:
-#         raise ValueError("`degree_restrict` should only have two values")
-#     if bounds[0] > bounds[1]:
-#         raise ValueError("Degree restrictions must be specified in ascending order")
-
-
-
-# degree_restrict = (0, 18)
-# exposure = 'quarantine'
-# outcome = 'D'
-# continuous_bound = 0.0005
-
-# # # initiate cat_vars, cont_vars and cat_unique_levels (SG_modified)
-# # self.cat_vars, self.cont_vars, self.cat_unique_levels = cat_vars, cont_vars, cat_unique_levels
-
-# # Checking for some common problems that should provide errors
-# for network in network_list:
-#     if not all([isinstance(x, int) for x in list(network.nodes())]):                    # Check if all node IDs are integers
-#         raise ValueError("NetworkTMLE requires that "                                   # ... possibly not needed?
-#                         "all node IDs must be integers")
-# for network in network_list:
-#     if nx.number_of_selfloops(network) > 0:                                             # Check for any self-loops in the network
-#         raise ValueError("NetworkTMLE does not support networks "                       # ... self-loops don't make sense in this
-#                         "with self-loops")                                              # ... setting
-
-# # Checking for a specified degree restriction
-# if degree_restrict is not None:                                                         # not-None means apply a restriction
-#     _check_degree_restrictions_(bounds=degree_restrict)                            # ... checks if valid degree restriction
-#     _max_degree_list_ = [degree_restrict[1]]*len(network_list)                     # ... extract max degree as upper bound
-# else:                                                                                   # otherwise if no restriction(s)
-#     if nx.is_directed(network):                                                         # ... directed max degree is max out-degree
-#         _max_degree_list_ = [np.max([d for n, d in network.out_degree]) for network in network_list]
-#     else:                                                                               # ... undirected max degree is max degree
-#         _max_degree_list_ = [np.max([d for n, d in network.degree]) for network in network_list]
-
-# # Generate a fresh copy of the network with ascending node order
-# oid = "_original_id_"                                                                   # Name to save the original IDs
-# labeled_network_list = []
-# for network in network_list:
-#     network = nx.convert_node_labels_to_integers(network,                               # Copy of new network with new labels
-#                                                 first_label=0,                          #  ... start at 0 for latent variance calc
-#                                                 label_attribute=oid)                    # ... saving the original ID labels
-#     labeled_network_list.append(network)                                                # ... saving to list
-
-# # Saving processed data copies
-# # self.network = network                                                                # Network with correct re-labeling
-# network_list = labeled_network_list                                                # List of networks with correct re-labeling
-# exposure = exposure                                                                # Exposure column / attribute name
-# outcome = outcome                                                                  # Outcome column / attribute name
-
-# # Background processing to convert network attribute data to pandas DataFrame
-# adj_matrix_list = [nx.adjacency_matrix(network, weight=None) for network in network_list]
-# df_list = [network_to_df(network) for network in network_list]
-# # self.adj_matrix = nx.adjacency_matrix(self.network,   # Convert to adjacency matrix
-# #                                       weight=None)    # TODO allow for weighted networks
-# # df = network_to_df(self.network)                      # Convert node attributes to pandas DataFrame
-
-# # Error checking for exposure types
-# for df in df_list:
-#     if not df[exposure].value_counts().index.isin([0, 1]).all():        # Only binary exposures allowed currently
-#         raise ValueError("NetworkTMLE only supports binary exposures "
-#                         "currently")
-
-# # Manage outcome data based on variable type
-# _continuous_outcome_list_ = []                                  
-# _cb_list_ = []                                                 
-# _continuous_min_list_ = []                                     
-# _continuous_max_list_ = []                                    
-
-# for i in range(len(df_list)):  
-#     if df_list[i][outcome].dropna().value_counts().index.isin([0, 1]).all():                # Binary outcomes
-#         _continuous_outcome_list_.append(False)                                        # ... mark as binary outcome
-#         _cb_list_.append(0.0)                                                          # ... set continuous bound to be zero
-#         _continuous_min_list_.append(0.0)                                              # ... saving binary min bound
-#         _continuous_max_list_.append(1.0)                                              # ... saving binary max bound
-#     else:                                                                                   # Continuous outcomes
-#         _continuous_outcome_list_.append(True)                                         # ... mark as continuous outcome
-#         _cb_list_.append(continuous_bound)                                             # ... save continuous bound value
-#         _continuous_min_list_.append(np.min(df_list[i][outcome]) - _cb_list_[i])  # ... determine min (with bound)
-#         _continuous_max_list_.append(np.max(df_list[i][outcome]) + _cb_list_[i])  # ... determine max (with bound)
-#         df_list[i][outcome] = tmle_unit_bounds(y=df_list[i][outcome],                  # ... bound the outcomes to be (0,1)
-#                                                 mini=_continuous_min_list_[i],
-#                                                 maxi=_continuous_max_list_[i])
-
-# # Creating summary measure mappings for all variables in the network
-# summary_types = ['sum', 'mean', 'var', 'mean_dist', 'var_dist']                             # Default summary measures available
-# handle_isolates = ['mean', 'var', 'mean_dist', 'var_dist']                                  # Whether isolates produce nan's
-# for i in range(len(df_list)):         
-#     for v in [var for var in list(df_list[i].columns) if var not in [oid, outcome]]:        # All cols besides ID and outcome
-#         v_vector = np.asarray(df_list[i][v])                                                # ... extract array of column
-#         for summary_measure in summary_types:                                               # ... for each summary measure
-#             df_list[i][v+'_'+summary_measure] = fast_exp_map(adj_matrix_list[i],       # ... calculate corresponding measure
-#                                                              v_vector,
-#                                                              measure=summary_measure)
-#             if summary_measure in handle_isolates:                                          # ... set isolates from nan to 0
-#                 df_list[i][v+'_'+summary_measure] = df_list[i][v+'_'+summary_measure].fillna(0)
-            
-#             if v+'_'+summary_measure not in cont_vars:
-#                 cont_vars.append(v+'_'+summary_measure)                                # ... add to continuous variables (SG_modified)
-
-# # Creating summary measure mappings for non-parametric exposure_map_model()
-# _nonparam_cols_ = []
-# for i in range(len(network_list)):
-#     exp_map_cols = exp_map_individual(network=network_list[i],                         # Generate columns of indicator
-#                                       variable=exposure,                                    # ... for the exposure
-#                                       max_degree=_max_degree_list_[i])                 # ... up to the maximum degree
-#     break
-#     _nonparam_cols_.append(list(exp_map_cols.columns))                                 # Save column list for estimation procedure
-#     df_list[i] = pd.merge(df_list[i],                                                       # Merge these columns into main data
-#                           exp_map_cols.fillna(0),                                           # set nan to 0 to keep same dimension across i
-#                           how='left', left_index=True, right_index=True)                    # Merge on index to left
-
-
-
-# attrs = []
-# for i in network_list[0].nodes:
-#     j_attrs = []
-#     for j in network_list[0].neighbors(i):
-#         j_attrs.append(network.nodes[j][exposure])
-#         attrs.append(j_attrs[:_max_degree_list_[0]])
-
-# len(attrs)
-
-# network_list[0]
-
-# _max_degree_list_[0]
-
-# def exp_map_individual(network, variable, max_degree):
-#     """Summary measure calculate for the non-parametric mapping approach described in Sofrygin & van der Laan (2017).
-#     This approach works best for networks with uniform degree distributions. This summary measure generates a number
-#     of columns (a total of ``max_degree``). Each column is then an indicator variable for each observation. To keep
-#     all columns the same number of dimensions, zeroes are filled in for all degrees above unit i's observed degree.
-
-#     Parameters
-#     ----------
-#     network : networkx.Graph
-#         The NetworkX graph object to calculate the summary measure for.
-#     variable : str
-#         Variable to calculate the summary measure for (this will always be the exposure variable internally).
-#     max_degree : int
-#         Maximum degree in the network (defines the number of columns to generate).
-
-#     Returns
-#     -------
-#     dataframe
-#         Data set containing all generated columns
-#     """
-#     attrs = []
-#     for i in network.nodes:
-#         j_attrs = []
-#         for j in network.neighbors(i):
-#             j_attrs.append(network.nodes[j][variable])
-#         attrs.append(j_attrs[:max_degree])
-
-#     return pd.DataFrame(attrs,
-#                         columns=[variable+'_map'+str(x+1) for x in range(max_degree)])
-
-
-
-
-
-# # Assign all mappings variables  (SG_modified)
-# # summary measures are consistent throughout time, hence all var names can be added to self.cat_vars/cont_vars
-# # but the mapping values from neighbors may not be consistent, choose the maximum degree mapping to ensure inclusiveness
-# if exposure in cat_vars:
-#     # print('categorical')
-#     self.cat_vars.extend(self._nonparam_cols_[-1]) # add all mappings to categorical variables
-
-#     for i in range(len(self._nonparam_cols_)):
-#         if i == 0: # init with the first time slice values
-#             for col in self._nonparam_cols_[i]:
-#                 self.cat_unique_levels[col] = pd.unique(df_list[i][col].astype('int')).max() + 1
-#         else: # update when bigger degree is encountered
-#             for col in self._nonparam_cols_[i]: 
-#                 if pd.unique(df_list[i][col].astype('int')).max() + 1 > self.cat_unique_levels[col]:
-#                     self.cat_unique_levels[col] = pd.unique(df_list[i][col].astype('int')).max() + 1
-
-# elif exposure in cont_vars:
-#     # print('continuous')
-#     self.cont_vars.extend(self._nonparam_cols_[-1])
-# else:
-#     raise ValueError('exposure is neither assigned to categorical or continuous variables')
-
-# # Calculating degree for all the nodes
-# self.df_list = [None] * len(df_list) # init self.df_list
-# for i in range(len(self.network_list)):
-#     if nx.is_directed(self.network_list[i]):                                                    # For directed networks...
-#         degree_data = pd.DataFrame.from_dict(dict(self.network_list[i].out_degree),             # ... use the out-degree
-#                                                 orient='index').rename(columns={0: 'degree'})
-#     else:                                                                                       # For undirected networks...
-#         degree_data = pd.DataFrame.from_dict(dict(self.network_list[i].degree),                 # ... use the regular degree
-#                                                 orient='index').rename(columns={0: 'degree'})
-#     self.df_list[i] = pd.merge(df_list[i],                                                      # Merge main data
-#                                 degree_data,                                                     # ...with degree data
-#                                 how='left', left_index=True, right_index=True)                   # ...based on index
-
-# # Assign degree variables (SG_modified)
-# self.cat_vars.append('degree')
-# for i in range(len(self.df_list)):
-#     if i == 0:
-#         self.cat_unique_levels['degree'] = pd.unique(self.df_list[i]['degree'].astype('int')).max() + 1
-#     else: # update when bigger degree is encountered
-#         if pd.unique(self.df_list[i]['degree'].astype('int')).max() + 1 > self.cat_unique_levels['degree']:
-#             self.cat_unique_levels['degree'] = pd.unique(self.df_list[i]['degree'].astype('int')).max() + 1 
-
-# # Apply degree restriction to data
-# for i in range(len(self.df_list)):
-#     if degree_restrict is not None:                                                                                 # If restriction provided,
-#         self.df_list[i]['__degree_flag__'] = self._degree_restrictions_(degree_dist=self.df_list[i]['degree'],
-#                                                                         bounds=degree_restrict)
-#         self._exclude_ids_degree_ = np.asarray(self.df_list[i].loc[self.df_list[i]['__degree_flag__'] == 1].index)
-#     else:                                                                                                           # Else all observations are used
-#         self.df_list[i]['__degree_flag__'] = 0                                                                      # Mark all as zeroes
-#         self._exclude_ids_degree_ = None                                                                            # No excluded IDs
-
-# # Marking data set restricted by degree (same as df if no restriction)
-# # self.df_restricted = self.df.loc[self.df['__degree_flag__'] == 0].copy()
-# self.df_restricted_list = [df.loc[df['__degree_flag__'] == 0].copy() for df in self.df_list]

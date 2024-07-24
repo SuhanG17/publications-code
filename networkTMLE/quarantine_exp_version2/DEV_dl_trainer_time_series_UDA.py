@@ -107,7 +107,7 @@ class MLPModelTimeSeriesNumericalUDA(nn.Module):
             # domain classifier
             batch_size, temporal_dim, feature_dim = x.shape
             # print(f'batch_size: {batch_size}, temporal_dim: {temporal_dim}, feature_dim: {feature_dim}')
-            x = x.view(batch_size, temporal_dim*feature_dim)
+            x = x.reshape(batch_size, temporal_dim*feature_dim)
             reverse_x = ReverseLayerF.apply(x, alpha)
             domain_output = self.domain_classifier(reverse_x) # -> [batch_size, 2]
             return class_output, domain_output
@@ -117,7 +117,7 @@ class MLPModelTimeSeriesNumericalUDA(nn.Module):
             # domain classifier
             batch_size, temporal_dim, feature_dim = x.shape
             # print(f'batch_size: {batch_size}, temporal_dim: {temporal_dim}, feature_dim: {feature_dim}')
-            x = x.view(batch_size, temporal_dim*feature_dim) 
+            x = x.reshape(batch_size, temporal_dim*feature_dim) 
             reverse_x = ReverseLayerF.apply(x, alpha)
             domain_output = self.domain_classifier(reverse_x) # -> [batch_size, 2] 
             return class_output, domain_output 
@@ -773,3 +773,10 @@ for epoch in range(epochs):
         alpha = 2. / (1. + np.exp(-10 * p)) - 1
         print(f'epoch: {epoch}, iter: {i}, p: {p:.3f}, alpha: {alpha:.3f}')
 
+
+
+len(trg_xdata_list)
+len(src_xdata_list)
+
+trg_xdata_list[0].shape
+src_xdata_list[0].shape
