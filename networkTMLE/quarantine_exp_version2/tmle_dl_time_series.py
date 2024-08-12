@@ -476,6 +476,11 @@ class NetworkTMLETimeSeries:
                                           family=f).fit()                                  # ... for given GLM family
             self._Qinit_ = self._outcome_model.predict(self.df_restricted_list[-1])        # Predict outcome values
 
+            label = self.df_restricted_list[-1][self.outcome]
+            pred_binary = np.round(self._Qinit_)
+            acc = (pred_binary == label).sum().item()/label.shape[0]
+            print(f'LR outcome model accuracy in observed data: {acc}')
+
             # If verbose is requested, output the relevant information
             if self._verbose_:
                 print('==============================================================================')
@@ -505,6 +510,11 @@ class NetworkTMLETimeSeries:
                                             self.df_restricted_list[-1],                       # ... fit to restricted data
                                             family=f).fit()                                    # ... for given GLM family
                 self._Qinit_ = self._outcome_model.predict(self.df_restricted_list[-1])        # Predict outcome values
+
+                label = self.df_restricted_list[-1][self.outcome]
+                pred_binary = np.round(self._Qinit_)
+                acc = (pred_binary == label).sum().item()/label.shape[0]
+                print(f'LR outcome model accuracy in observed data: {acc}')
 
             else:
                 # Extract data using the model
@@ -552,10 +562,10 @@ class NetworkTMLETimeSeries:
         # custom_path = 'outcome_' + self.outcome + '.pth'
         custom_path = 'outcome_' + self.outcome + '_' + self.task_string + '.pth'
         self._q_custom_ = custom_model
-        self._q_custom_path_, _, self.y_star = outcome_deep_learner_ts(custom_model, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
-                                                                       T_in_id, T_out_id,
-                                                                       self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
-                                                                       predict_with_best=False, custom_path=custom_path)
+        self._q_custom_path_, self._Qinit_DL_, self.y_star = outcome_deep_learner_ts(custom_model, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
+                                                                                     T_in_id, T_out_id,
+                                                                                     self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
+                                                                                     predict_with_best=False, custom_path=custom_path)
         # self._q_custom_path_, self._Qinit_, self.y_star = outcome_deep_learner_ts(custom_model, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
         #                                                                           T_in_id, T_out_id,
         #                                                                           self.adj_matrix_list, self.cat_vars, self.cont_vars, self.cat_unique_levels, n_output_list, self._continuous_outcome_list_[-1],
@@ -655,11 +665,22 @@ class NetworkTMLETimeSeries:
         
         # Step 3) Target the parameter
         # if self.use_deep_learner_outcome:  # use LR to find epsilon
-        epsilon = targeting_step(y=self.df_restricted_list[-1][self.outcome],   # Estimate the targeting model given observed Y
-                                 q_init=self._Qinit_,                           # ... predicted values of Y under observed A
-                                 ipw=h_iptw,                                    # ... weighted by IPW
-                                 verbose=self._verbose_)                        # ... with option for verbose info
-        print(f'epsilon: {epsilon}')
+        if self.use_deep_learner_outcome: # set DL epsilon with bounded q_init in targeting_step()
+            # epsilon = 0.
+            epsilon = targeting_step(y=self.df_restricted_list[-1][self.outcome],   # Estimate the targeting model given observed Y
+                                     q_init=self._Qinit_DL_,                        # ... predicted values of Y under observed A
+                                     ipw=h_iptw,                                    # ... weighted by IPW
+                                     verbose=self._verbose_)                        # ... with option for verbose info
+            print(f'epsilon: {epsilon}') 
+            if np.abs(epsilon) > 10: # if epsilon is off-the-chart large, set it to 0
+                print(f'epsilon: {epsilon} is off-the-chart large, set it to 0')
+                epsilon = 0.         
+        else:
+            epsilon = targeting_step(y=self.df_restricted_list[-1][self.outcome],   # Estimate the targeting model given observed Y
+                                     q_init=self._Qinit_,                           # ... predicted values of Y under observed A
+                                     ipw=h_iptw,                                    # ... weighted by IPW
+                                     verbose=self._verbose_)                        # ... with option for verbose info
+            print(f'epsilon: {epsilon}')
 
         # Step 4) Monte Carlo integration (old code did in loop but faster as vector)
         #
@@ -726,7 +747,10 @@ class NetworkTMLETimeSeries:
                                      maxi=self._continuous_max_list_[-1])                       # ... and max values
         else:                                                                                   # Otherwise nothing special...
             y_ = np.array(self.df_restricted_list[-1][self.outcome])                            # Observed outcome for Var
-            yq0_ = self._Qinit_                                                                 # Predicted outcome for Var
+            if self.use_deep_learner_outcome:
+                yq0_ = self._Qinit_DL_
+            else:
+                yq0_ = self._Qinit_                                                                 # Predicted outcome for Var
 
         # Step 5) Variance estimation
         zalpha = norm.ppf(1 - self.alpha / 2, loc=0, scale=1)                                   # Get corresponding Z-value based on desired alpha
@@ -1259,6 +1283,22 @@ class NetworkTMLETimeSeries:
 
             # intiate pooled sample list
             data['_sample_id_'] = s                # Setting sample ID
+            # Re-creating any threshold variables in the pooled sample data
+            if self._thresholds_any_:
+                create_threshold(data=data,
+                                 variables=self._thresholds_variables_,
+                                 thresholds=self._thresholds_,
+                                 definitions=self._thresholds_def_,
+                                 graph=graph_init[0])
+            # Re-creating any categorical variables in the pooled sample data
+            if self._categorical_any_:
+                create_categorical(data=data,
+                                   variables=self._categorical_variables_,
+                                   bins=self._categorical_,
+                                   labels=self._categorical_def_,
+                                   verbose=False,
+                                   graph=graph_init[0])            
+
             pooled_per_sample = [data.copy()]
 
             for time_step in range(1, len(self.df_list)): # start from 1 because the first time step is already initiated

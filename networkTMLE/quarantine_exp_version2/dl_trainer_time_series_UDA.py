@@ -195,6 +195,7 @@ class MLPTS_UDA:
             data_source = data_source_iter.next()
             src_x_cat, src_x_cont, src_y, src_sample_idx = data_source
             # send to device
+            # print(f'src_x_cat: {src_x_cat.shape}, src_x_cont: {src_x_cont.shape}, src_y: {src_y.shape}, src_sample_idx: {src_sample_idx.shape}')
             src_x_cat, src_x_cont, src_y = src_x_cat.to(self.device), src_x_cont.to(self.device), src_y.to(self.device)
             src_sample_idx = src_sample_idx.to(self.device)
 
@@ -220,6 +221,7 @@ class MLPTS_UDA:
             data_target = data_target_iter.next()
             trg_x_cat, trg_x_cont, trg_y, trg_sample_x = data_target
             # send to device
+            # print(f'trg_x_cat: {trg_x_cat.shape}, trg_x_cont: {trg_x_cont.shape}, trg_y: {trg_y.shape}, trg_sample_x: {trg_sample_x.shape}')
             trg_x_cat, trg_x_cont, trg_y = trg_x_cat.to(self.device), trg_x_cont.to(self.device), trg_y.to(self.device)
             trg_sample_x = trg_sample_x.to(self.device)
 

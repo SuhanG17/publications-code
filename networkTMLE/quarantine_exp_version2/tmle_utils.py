@@ -373,11 +373,8 @@ def exposure_machine_learner(ml_model, xdata, ydata, pdata):
 #     return log.params[0]  # Returns single-step estimated Epsilon term
 
 def targeting_step(y, q_init, ipw, verbose):
-    """Remove observations if q_init has 1 values. which avoid zero division under probability_to_odds() """
-    y = y[q_init != 1]
-    ipw = ipw[q_init != 1]
-    q_init = q_init[q_init != 1]
-    print(f'Number of observations removed in the targeting step: {len(y) - len(y[q_init != 1])}')
+    """Bound q_init values with (0.05, 0.95) to avoid zero division under probability_to_odds() """
+    q_init = np.clip(q_init, 0.005, 0.995)
     
     f = sm.families.family.Binomial()
     log = sm.GLM(y,  # Outcome / dependent variable
@@ -486,7 +483,6 @@ def create_threshold(data, variables, thresholds, definitions, graph=None):
                 raise NotImplementedError("Directed graph is not supported yet")
             else:
                 nx.set_node_attributes(graph, dict(data[label]), label)
-
 
 def create_categorical(data, variables, bins, labels, verbose=False, graph=None):
     """
@@ -990,117 +986,6 @@ def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, p
 
     return pred
 
-# def exposure_deep_learner_ts(deep_learner, xdata_list, ydata_list, pdata_list, pdata_y_list, exposure, use_all_time_slices,
-#                              adj_matrix_list, cat_vars, cont_vars, cat_unique_levels, n_output_list, 
-#                              custom_path, **kwargs):
-#     """Internal function to fit custom_models for the exposure nuisance model and generate the predictions.
-
-#     Parameters
-#     ----------
-#     deep_learner :
-#         instance of the deep learning model
-#     xdata_list : list of pd.dataframe
-#         list of Covariate data to fit the model with, len() = T
-#     ydata : list of pandas.core.series.Series
-#         list of Outcome data to fit the model with, len() = T
-#     pdata_list : list of pd.dataframe
-#         list of Covariate data to generate the predictions with, len() = T
-#     pdata_y_list : list of pandas.core.series.Series
-#         lisf of Truth for predictions, used to evaluate model performance, len() = T
-#     exposure: string
-#         Exposure patamerter to predict
-#     use_all_time_slices: bool
-#         if use outcome data from all time slices to train the model
-#     adj_matrix_list: list of SciPy sparse array
-#         list of adjacency matrix for GCN model, len() = T, 
-#         adj_matrix_list[i] is a SciPy sparse array for observed data
-#                            is a list of Scipy sparse array for pooled data
-#         accomendations are made in GCNModelTimeSeries() model
-#     cat_vars: list
-#         list of categorical variables for df_restricted, not xdata
-#     cont_vars: list
-#         list of continuous variables for df_restricted, not xdata
-#     cat_unique_levles: dict
-#         dictionary of categorical variables and their unique levels for df_restricted, not xdata
-#     n_output_list: list of int
-#         list of number of levels in output layer, 2 for binary, multilevel as specified; len() = T
-#     custom_path: string
-#         path to saved best model, if different from model.save_path
-#     kwargs: dict
-#         include all/partial init parameters for AbstractML model, key should be the same as the init parameter name
-
-#     Returns
-#     -------
-#     array
-#         Predicted values for the outcome (probability if binary, and expected value otherwise)
-#     """
-#     T = len(xdata_list)
-
-#     # Re-arrange data
-#     model_cat_vars_list = []
-#     model_cont_vars_list = []
-#     model_cat_unique_levels_list = []
-
-#     cat_vars_list = []
-#     cont_vars_list = []
-#     cat_unique_levels_list = []
-
-#     fit_df_list = []
-#     pred_df_list = []
-#     ydata_array_list = []
-
-#     for i, (xdata, ydata, pdata, pdata_y) in enumerate(zip(xdata_list, ydata_list, pdata_list, pdata_y_list)):
-#         model_cat_vars, model_cont_vars, model_cat_unique_levels, cat_vars, cont_vars, cat_unique_levels = get_model_cat_cont_split_patsy_matrix(xdata, 
-#                                                                                                                                                  cat_vars, cont_vars, cat_unique_levels)
-#         model_cat_vars_list.append(model_cat_vars)
-#         model_cont_vars_list.append(model_cont_vars)
-#         model_cat_unique_levels_list.append(model_cat_unique_levels)
-
-#         cat_vars_list.append(cat_vars)
-#         cont_vars_list.append(cont_vars)
-#         cat_unique_levels_list.append(cat_unique_levels)
-
-#         fit_df_list.append(append_target_to_df(ydata, xdata, exposure))
-#         pred_df_list.append(append_target_to_df(pdata_y, pdata, exposure))
-        
-#         # ydata_array_list.extend(ydata.to_numpy()) # convert pd.series to np.array and merge into a large list
-#         if i == len(ydata_list) - 1: # only use the last time slice
-#             ydata_array_list.extend(ydata.to_numpy())
-        
-#     model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final = get_final_model_cat_cont_split(model_cat_vars_list, model_cont_vars_list, model_cat_unique_levels_list)
-
-#     ## check if n_output is consistent 
-#     if not all_equal(n_output_list):
-#         raise ValueError("n_output are not identical throughout time slices")
-#     else:
-#         n_output_final = n_output_list[-1]    
-
-#     ## set weight against class imbalance
-#     pos_weight, class_weight = get_imbalance_weights(n_output_final, ydata_array_list, imbalance_threshold=3.)
-
-#     # Fitting model
-#     ## update init parameters
-#     for param, value in kwargs.items():
-#         setattr(deep_learner, param, value)    
-
-#     best_model_path = deep_learner.fit(fit_df_list, exposure, use_all_time_slices, T, pos_weight, class_weight,
-#                                        adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
-#                                        n_output_final, custom_path=custom_path)
-
-#     # Generating predictions
-#     pred = deep_learner.predict(pred_df_list, exposure, use_all_time_slices, T, pos_weight, class_weight,
-#                                 adj_matrix_list, model_cat_vars_final, model_cont_vars_final, model_cat_unique_levels_final, 
-#                                 n_output_final, custom_path=custom_path)
-#     pred = np.concatenate(pred, 0)
-#     # [[batch_size, n_output, T], [batch_size, n_output, T] ...] -> [sample_size, n_output, T]
-#     if n_output_final == 2: # binary classification with BCEloss
-#         pred = pred.squeeze(1) # [sample_size, 1, T] -> [sample_size, T]
-#         pred = pred[:, -1] # only return the last time slice 
-#     else:
-#         pred = get_probability_from_multilevel_prediction(pred[:, :, -1], pdata_y_list[-1]) # only return the last time slice
-
-#     return pred
-
 
 def outcome_deep_learner_ts(deep_learner, src_xdata_list, src_ydata_list, trg_xdata_list, trg_ydata_list,
                             T_in_id, T_out_id,
@@ -1162,6 +1047,8 @@ def outcome_deep_learner_ts(deep_learner, src_xdata_list, src_ydata_list, trg_xd
     if num_samples_in_src != num_samples_in_trg:
         trg_xdata_list = [df[:num_samples_in_src] for df in trg_xdata_list_full]
         trg_ydata_list = [df[:num_samples_in_src] for df in trg_ydata_list_full]
+    else:
+        trg_xdata_list, trg_ydata_list = trg_xdata_list_full, trg_ydata_list_full
 
 
     # Re-arrange data

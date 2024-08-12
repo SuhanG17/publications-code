@@ -24,8 +24,8 @@ from dl_trainer_time_series_UDA import MLPTS_UDA
 # Setting simulation parameters
 ############################################
 # n_mc = 500
-n_mc = 30
-# n_mc = 1
+# n_mc = 30
+n_mc = 1
 
 exposure = "quarantine"
 outcome = "D"
@@ -33,18 +33,18 @@ outcome = "D"
 ########################################
 # Running through logic from .sh script
 ########################################
-parser = argparse.ArgumentParser(description='DLnetworkTMLE')
-parser.add_argument('--task_string', type=str, required=True, default='10010',
-                    help='the slurm_setup id in string format')
-parser.add_argument('--use_deep_learner_outcome', action='store_true', 
-                    help='default to false, if given, use deep learner for outcome model')
-args = parser.parse_args()
-# # test run with dummy args
-# class Args(object):
-#     def __init__(self):
-#         self.task_string = '10010'
-#         self.use_deep_learner_outcome = True
-# args = Args()
+# parser = argparse.ArgumentParser(description='DLnetworkTMLE')
+# parser.add_argument('--task_string', type=str, required=True, default='10010',
+#                     help='the slurm_setup id in string format')
+# parser.add_argument('--use_deep_learner_outcome', action='store_true', 
+#                     help='default to false, if given, use deep learner for outcome model')
+# args = parser.parse_args()
+# test run with dummy args
+class Args(object):
+    def __init__(self):
+        self.task_string = '10010'
+        self.use_deep_learner_outcome = True
+args = Args()
 
 
 # script_name, slurm_setup = argv
@@ -217,6 +217,7 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 # Running simulation
 ########################################
 for i in range(n_mc):
+    i=7
     print(f'simulation {i}')
     ######## inside for loop ########
     # Generating Data
@@ -342,7 +343,7 @@ for i in range(n_mc):
     if not use_deep_learner_outcome and q_estimator is None:
         ntmle._outcome_model.summary()
 
-    # p=0.75
+    p=0.45
 
     for p in prop_treated:  # loops through all treatment plans
         print(f'p={p}')
@@ -373,6 +374,59 @@ for i in range(n_mc):
             results.loc[i, 'ucll_'+str(p)] = np.nan
     ####### inside for loop ########
     print()
+
+# TEST BEGIN
+import statsmodels.api as sm
+
+y=ntmle.df_restricted_list[-1][ntmle.outcome]
+q_init=ntmle._Qinit_DL_
+ipw=ntmle.h_iptw
+verbose=False
+
+(q_init <= 0.005).sum()
+(q_init <= 0.995).sum()
+
+ipw[q_init <= 0.005].mean()
+ipw[q_init >= 0.995].mean()
+
+# ntmle._Qinit_.min()
+# ntmle._Qinit_.max()
+# q_init = ntmle._Qinit_
+q_init = np.clip(q_init, 0.2, 0.85)
+q_init
+# ipw
+
+np.log(probability_to_odds(0.05))
+np.log(probability_to_odds(0.95))
+np.exp(6)
+
+
+f = sm.families.family.Binomial()
+log = sm.GLM(y,  # Outcome / dependent variable
+             np.repeat(1, y.shape[0]),  # Generating intercept only model
+             offset=np.log(probability_to_odds(q_init)),  # Offset by g-formula predictions
+             freq_weights=ipw,  # Weighted by calculated IPW
+             family=f).fit(maxiter=500)
+
+epsilon = log.params[0]
+epsilon = -0.33
+print(f'epsilon: {epsilon}')
+
+np.exp(0)
+q_star = (ntmle.y_star * np.exp(epsilon)) / (1 - ntmle.y_star + ntmle.y_star * np.exp(epsilon))
+ntmle.pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star 
+marginals_vector = np.asarray(ntmle.pooled_data_restricted_list[-1].groupby('_sample_id_')['__pred_q_star__'].mean())
+marginal_outcome = np.mean(marginals_vector) 
+print(f'marginal_outcome: {marginal_outcome}')
+bias = marginal_outcome - truth[p]
+print(f'bias: {bias}')
+
+log.params
+log.summary()
+
+# TEST END
+
+
 
 
 ########################################
