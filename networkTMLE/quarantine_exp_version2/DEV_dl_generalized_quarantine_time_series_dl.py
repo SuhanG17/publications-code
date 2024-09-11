@@ -63,8 +63,8 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # choose which what-if mechanism to test
-mode = 'bottom'
-percent_candidates = 0.3
+mode = 'top'
+percent_candidates = 0.5
 quarantine_period = 2
 inf_duration = 5
 

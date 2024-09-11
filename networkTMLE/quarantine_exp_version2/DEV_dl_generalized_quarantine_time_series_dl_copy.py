@@ -42,8 +42,8 @@ outcome = "D"
 # test run with dummy args
 class Args(object):
     def __init__(self):
-        self.task_string = '10010'
-        self.use_deep_learner_outcome = True
+        self.task_string = '70040'
+        self.use_deep_learner_outcome = False
 args = Args()
 
 
@@ -63,8 +63,8 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # choose which what-if mechanism to test
-mode = 'all'
-percent_candidates = 0.3
+mode = 'top'
+percent_candidates = 0.5
 quarantine_period = 2
 inf_duration = 5
 
@@ -217,7 +217,7 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 # Running simulation
 ########################################
 for i in range(n_mc):
-    i=7
+    i=10
     print(f'simulation {i}')
     ######## inside for loop ########
     # Generating Data
@@ -259,28 +259,96 @@ for i in range(n_mc):
     if model in ["cw", "wc"]:
         ntmle.define_threshold(variable='H', threshold=2, definition='sum')
     if model == "np":
-        if network == "uniform":
-            if n_nodes == 500:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
-            elif n_nodes == 1000:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+        if mode == 'all':
+            if network == "uniform":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                else:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+            elif network == "random":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
             else:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-        elif network == "random":
-            if n_nodes == 500:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-            elif n_nodes == 1000:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                raise ValueError("Invalid model-network combo")
+        elif mode == 'top':
+            if network == "uniform":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+            elif network == "random":
+                if n_nodes == 500:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
             else:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                raise ValueError("Invalid model-network combo")
+        elif mode == 'bottom':
+            if network == "uniform":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+            elif network == "random":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                elif n_nodes == 1000:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
+            else:
+                raise ValueError("Invalid model-network combo")
         else:
-            raise ValueError("Invalid model-network combo")
+            raise ValueError("Invalid mode")
+            
     # ntmle.exposure_model(gin_model)
     # ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
     # ntmle.outcome_model(qn_model, custom_model=q_estimator)
@@ -354,7 +422,7 @@ for i in range(n_mc):
                           shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration, 
                           T_in_id=T_in_id, T_out_id=T_out_id)
             else:
-                ntmle.fit(p=p, samples=10, bound=0.01, seed=seed_number+i,
+                ntmle.fit(p=p, samples=3, bound=0.01, seed=seed_number+i,
                           shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration,
                           T_in_id=T_in_id, T_out_id=T_out_id)
             results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
@@ -376,53 +444,114 @@ for i in range(n_mc):
     print()
 
 # TEST BEGIN
-import statsmodels.api as sm
-
-y=ntmle.df_restricted_list[-1][ntmle.outcome]
-q_init=ntmle._Qinit_DL_
-ipw=ntmle.h_iptw
-verbose=False
-
-(q_init <= 0.005).sum()
-(q_init <= 0.995).sum()
-
-ipw[q_init <= 0.005].mean()
-ipw[q_init >= 0.995].mean()
-
-# ntmle._Qinit_.min()
-# ntmle._Qinit_.max()
-# q_init = ntmle._Qinit_
-q_init = np.clip(q_init, 0.2, 0.85)
-q_init
-# ipw
-
-np.log(probability_to_odds(0.05))
-np.log(probability_to_odds(0.95))
-np.exp(6)
+# samples = 10
+# seed = seed_number+i
+# pooled_data_restricted_list, pooled_adj_matrix_list = ntmle._generate_pooled_samples(samples=samples,
+#                                                                                     seed=seed,
+#                                                                                     shift=shift,
+#                                                                                     mode=mode,
+#                                                                                     percent_candidates=percent_candidates,
+#                                                                                     pr_a=p,
+#                                                                                     quarantine_period=quarantine_period,
+#                                                                                     inf_duration=inf_duration)
 
 
-f = sm.families.family.Binomial()
-log = sm.GLM(y,  # Outcome / dependent variable
-             np.repeat(1, y.shape[0]),  # Generating intercept only model
-             offset=np.log(probability_to_odds(q_init)),  # Offset by g-formula predictions
-             freq_weights=ipw,  # Weighted by calculated IPW
-             family=f).fit(maxiter=500)
 
-epsilon = log.params[0]
-epsilon = -0.33
-print(f'epsilon: {epsilon}')
+import patsy
+obs_d = patsy.dmatrix(ntmle._q_model + ' - 1', ntmle.df_restricted_list[-1], return_type='dataframe') 
+obs_d.columns
+obs_d_array = np.array(obs_d)
+obs_d_array.shape
 
-np.exp(0)
-q_star = (ntmle.y_star * np.exp(epsilon)) / (1 - ntmle.y_star + ntmle.y_star * np.exp(epsilon))
-ntmle.pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star 
-marginals_vector = np.asarray(ntmle.pooled_data_restricted_list[-1].groupby('_sample_id_')['__pred_q_star__'].mean())
-marginal_outcome = np.mean(marginals_vector) 
-print(f'marginal_outcome: {marginal_outcome}')
-bias = marginal_outcome - truth[p]
-print(f'bias: {bias}')
+d = patsy.dmatrix(ntmle._q_model + ' - 1', ntmle.pooled_data_restricted_list[-1], return_type='dataframe')
+d.columns
+d_array = np.array(d)
+d_array.shape
 
-log.params
-log.summary()
+data = ntmle.df_restricted_list[-1]
+data = ntmle.pooled_data_restricted_list[-1] 
+# data = pooled_data_restricted_list[-1] 
+
+var_name = 'H_sum'
+data[var_name].unique()
+
+variables = [var_name]
+# bins = [[0, 1, 3]]
+# bins = [[0, 1, 2, 6]]
+# bins = [[0, 1, 2, 4, 10]]
+# bins = [[0, 1, 2, 10]]
+# bins = [[0, 1, 2, 4, 7, 18]]
+# bins = [[0, 1, 5]]
+# bins = [[0, 1, 2, 3, 6]]
+# bins = [[0, 1, 2, 10]]
+# bins = [[0, 1, 2, 3, 4, 8, 26]]
+# bins = [[0, 1, 2, 3, 6]]
+# bins = [[0, 1, 2, 6]]
+# bins = [[0, 1, 2, 3, 4, 6]]
+bins = [[0, 1, 2, 3, 4, 5, 10]]
+bins = [[0, 1, 2, 3, 10]]
+bins = [[0, 1, 2, 3, 4, 6, 9, 26]]
+bins = [[0, 1, 2, 3, 4, 6, 26]]
+
+labels = [False]
+for v, b, l in zip(variables, bins, labels):
+    print(v)
+    print(b)
+    print(l)
+
+out = pd.cut(data[v],
+             bins=b,
+             labels=l,
+             include_lowest=True).astype(float)
+out.unique()
+
+# import statsmodels.api as sm
+
+# y=ntmle.df_restricted_list[-1][ntmle.outcome]
+# q_init=ntmle._Qinit_DL_
+# ipw=ntmle.h_iptw
+# verbose=False
+
+# (q_init <= 0.005).sum()
+# (q_init <= 0.995).sum()
+
+# ipw[q_init <= 0.005].mean()
+# ipw[q_init >= 0.995].mean()
+
+# # ntmle._Qinit_.min()
+# # ntmle._Qinit_.max()
+# # q_init = ntmle._Qinit_
+# q_init = np.clip(q_init, 0.2, 0.85)
+# q_init
+# # ipw
+
+# np.log(probability_to_odds(0.05))
+# np.log(probability_to_odds(0.95))
+# np.exp(6)
+
+
+# f = sm.families.family.Binomial()
+# log = sm.GLM(y,  # Outcome / dependent variable
+#              np.repeat(1, y.shape[0]),  # Generating intercept only model
+#              offset=np.log(probability_to_odds(q_init)),  # Offset by g-formula predictions
+#              freq_weights=ipw,  # Weighted by calculated IPW
+#              family=f).fit(maxiter=500)
+
+# epsilon = log.params[0]
+# epsilon = -0.33
+# print(f'epsilon: {epsilon}')
+
+# np.exp(0)
+# q_star = (ntmle.y_star * np.exp(epsilon)) / (1 - ntmle.y_star + ntmle.y_star * np.exp(epsilon))
+# ntmle.pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star 
+# marginals_vector = np.asarray(ntmle.pooled_data_restricted_list[-1].groupby('_sample_id_')['__pred_q_star__'].mean())
+# marginal_outcome = np.mean(marginals_vector) 
+# print(f'marginal_outcome: {marginal_outcome}')
+# bias = marginal_outcome - truth[p]
+# print(f'bias: {bias}')
+
+# log.params
+# log.summary()
 
 # TEST END
 
