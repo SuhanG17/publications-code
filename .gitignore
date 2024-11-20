@@ -8,5 +8,7 @@
 *.txt
 *.log
 *.pid
+figures/
+results_csv/
 results/
 avg_sims_results/

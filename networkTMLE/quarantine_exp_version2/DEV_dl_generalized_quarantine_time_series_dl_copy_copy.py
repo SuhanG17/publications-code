@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 from dl_trainer_time_series_UDA import MLPTS_UDA
 
-# Excel sheet: no shift_mode=50%_bottom_t=10
+# Excel sheet: no shift_mode=all_time=9
 ############################################
 # Setting simulation parameters
 ############################################
@@ -64,7 +64,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # choose which what-if mechanism to test
-mode = 'bottom'
+mode = 'all'
 percent_candidates = 0.5
 quarantine_period = 2
 inf_duration = 5
@@ -82,8 +82,8 @@ use_deep_learner_outcome = args.use_deep_learner_outcome
 # lr bias: 0.5108185131009413
 
 
+T_in_id = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 # T_in_id = [6, 7, 8, 9]
-T_in_id = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 # T_in_id = [8, 9]
 T_out_id = [9]
 
