@@ -204,56 +204,60 @@ plt.show()
 def plot_bias_ese_with_cover(x, y_lr, y_dl, y_err_lr, y_err_dl,
                              cover_lr, cover_dl,
                              font, save_path='./', figure_name='bias_ese_cover'):
-    # plot with double y axis
-    fig, ax1 = plt.subplots(figsize=(16, 9), facecolor='white')
+	# plot with double y axis
+	fig, ax1 = plt.subplots(figsize=(16, 9), facecolor='white')
 
-    # plot figure 1 with left y axis
-    color = 'tab:red'
-    # ax.plot(x, y, 'o-', linewidth=2)
-    ax1.errorbar(x-0.01, y_lr, yerr=y_err_lr, capsize=5, fmt='-o', color='#ed36d1', label='LR_Bias_ESE')
-    ax1.errorbar(x+0.01, y_dl, yerr=y_err_dl, capsize=5, fmt='-o', color='#0021ff',label='DL_Bias_ESE')
-    # show zero line
-    ax1.axhline(y=0, color='grey', linestyle='-.', linewidth=2)
+	# plot figure 1 with left y axis
+	color = 'tab:red'
+	# ax.plot(x, y, 'o-', linewidth=2)
+	ax1.errorbar(x-0.01, y_lr, yerr=y_err_lr, capsize=5, fmt='-o', color='#ed36d1', label='LR_Bias_ESE')
+	ax1.errorbar(x+0.01, y_dl, yerr=y_err_dl, capsize=5, fmt='-o', color='#0021ff',label='DL_Bias_ESE')
+	# show zero line
+	ax1.axhline(y=0, color='grey', linestyle='-.', linewidth=2)
 
-    # set tick limit and label 
-    ax1.set(xlim=(0, 1), xticks=np.arange(0, 1, 0.05),
-            ylim=(-1, 1), yticks=np.arange(-1, 1, 0.1))
-    ax1.tick_params(axis='both', which='major', labelsize=15)
-    ax1.tick_params(axis='y', labelcolor=color)
+	# set tick limit and label 
+	ax1.set(xlim=(0, 1), xticks=np.arange(0, 1, 0.05),
+			ylim=(-1, 1), yticks=np.arange(-1, 1, 0.1))
+	ax1.tick_params(axis='both', which='major', labelsize=15)
+	ax1.tick_params(axis='y', labelcolor=color)
 
-    # set axis label
-    ax1.set_xlabel('Exposure Probability $p_{\omega}$', fontdict=font)
-    ax1.set_ylabel('Bias', fontdict=font, color=color)
+	# set axis label
+	ax1.set_xlabel('Exposure Probability $p_{\omega}$', fontdict=font)
+	ax1.set_ylabel('Bias', fontdict=font, color=color)
 
-    # plot figure 2 with right y axis
-    ax2 = ax1.twinx()  # instantiate a second Axes that shares the same x-axis
-    color = 'tab:blue'
+	# plot figure 2 with right y axis
+	ax2 = ax1.twinx()  # instantiate a second Axes that shares the same x-axis
+	color = 'tab:blue'
 
-    ax2.bar(x-0.01, cover_lr, width=0.02, fill=False, hatch='///', 
-            edgecolor="#425bd9", linewidth=1, alpha=0.5, label='LR_Coverage')
-    ax2.bar(x+0.01, cover_dl, width=0.02, fill=False, hatch='..', 
-            edgecolor="#258b52", linewidth=1, alpha=0.5, label='DL_Coverage')
+	ax2.bar(x-0.01, cover_lr, width=0.02, fill=False, hatch='///', 
+			edgecolor="#425bd9", linewidth=1, alpha=0.5, label='LR_Coverage')
+	ax2.bar(x+0.01, cover_dl, width=0.02, fill=False, hatch='..', 
+			edgecolor="#258b52", linewidth=1, alpha=0.5, label='DL_Coverage')
 
-    # set tick limit and label
-    ax2.set(ylim=(0, 1), yticks=np.arange(0, 1, 0.05))
-    ax2.tick_params(axis='y', labelcolor=color)
-    ax2.tick_params(axis='both', which='major', labelsize=15)
+	# set tick limit and label
+	ax2.set(ylim=(0, 1), yticks=np.arange(0, 1, 0.05))
+	ax2.tick_params(axis='y', labelcolor=color)
+	ax2.tick_params(axis='both', which='major', labelsize=15)
 
-    # set axis label
-    ax2.set_ylabel('Coverage', fontdict=font, color=color)  # we already handled the x-label with ax1
+	# set axis label
+	ax2.set_ylabel('Coverage', fontdict=font, color=color)  # we already handled the x-label with ax1
 
-    # add legend
-    fig.legend(loc='center', bbox_to_anchor=[0.14, 0.89],
-            fontsize=15)
+	# add legend
+	# for single plot
+	fig.legend(loc='center', bbox_to_anchor=[0.14, 0.89],
+	        fontsize=15)
+    # # for combined plot
+	# ax1.legend(loc='center left', bbox_to_anchor=[0.0, 0.95], fontsize=15)
+	# ax2.legend(loc='center left', bbox_to_anchor=[0.0, 0.85], fontsize=15)
 
-    # show grid
-    plt.grid(color = 'green', linestyle = '--', linewidth = 0.5)
+	# show grid
+	plt.grid(color = 'green', linestyle = '--', linewidth = 0.5)
 
-    # save figure
-    fig.tight_layout()  # otherwise the right y-label is slightly clipped
-    # plt.show()
-    save_path = save_path + figure_name + '.png'
-    fig.savefig(save_path, dpi=300)
+	# save figure
+	fig.tight_layout()  # otherwise the right y-label is slightly clipped
+	# plt.show()
+	save_path = save_path + figure_name + '.png'
+	fig.savefig(save_path, dpi=300)
 
 plot_bias_ese_with_cover(x_label, y_lr, y_dl, y_err_lr, y_err_dl, cover_lr, cover_dl, font, save_path='./', figure_name='bias_ese_cover')
     
@@ -266,12 +270,18 @@ networktype = ['10010', '10020', '10030', '10040',
                '50010', '50020', '50030', '50040',
                '60010', '60020', '60030', '60040',
                '70010', '70020', '70030', '70040']
+titles = ['CC: uniform 500', 'CW: uniform 500', 'WC: uniform 500', 'Flexible: uniform 500',
+		  'CC: random 500', 'CW: random 500', 'WC: random 500', 'Flexible: random 500',
+		  'CC: uniform 1000', 'CW: uniform 1000', 'WC: uniform 1000', 'Flexible: uniform 1000',
+		  'CC: random 1000', 'CW: random 1000', 'WC: random 1000', 'Flexible: random 1000',
+		  'CC: uniform 2000', 'CW: uniform 2000', 'WC: uniform 2000', 'Flexible: uniform 2000',
+		  'CC: random 2000', 'CW: random 2000', 'WC: random 2000', 'Flexible: random 2000']
 
 # csv dir
 # # mode=all; time=9
-# dir_path = 'results_csv/mode_all/'
+# dir_path = '../results_csv/mode_all/'
 # ts='9'
-# save_path='figures/mode_all/'
+# save_path='../figures/mode_all/'
 # # mode=top_50; time=10
 dir_path = '../results_csv/mode_top_50/'
 ts='10'
@@ -324,3 +334,189 @@ for i, network_string in enumerate(networktype):
     # combined plots
     plot_bias_ese_with_cover(x_label, lr_bias_array[i], dl_bias_array[i], lr_ese_array[i], dl_ese_array[i],
                             lr_cover_array[i], dl_cover_array[i], font, save_path=save_path, figure_name='bias_ese_cover_'+network_string)
+
+
+# plot all sceanrios in one plot
+
+# source: https://jwalton.info/Embed-Publication-Matplotlib-Latex/
+# get latex \textwidth: https://tex.stackexchange.com/questions/39383/determine-text-width
+def set_size(width, fraction=1, subplots=(1, 1)):
+    """Set figure dimensions to avoid scaling in LaTeX.
+
+    Parameters
+    ----------
+    width: float or string
+            Document width in points, or string of predined document type
+    fraction: float, optional
+            Fraction of the width which you wish the figure to occupy
+    subplots: array-like, optional
+            The number of rows and columns of subplots.
+    Returns
+    -------
+    fig_dim: tuple
+            Dimensions of figure in inches
+    """
+    if width == 'thesis':
+        width_pt = 426.79135
+    elif width == 'beamer':
+        width_pt = 307.28987
+    else:
+        width_pt = width
+
+    # Width of figure (in pts)
+    fig_width_pt = width_pt * fraction
+    # Convert from pt to inches
+    inches_per_pt = 1 / 72.27
+
+    # Golden ratio to set aesthetic figure height
+    # https://disq.us/p/2940ij3
+    golden_ratio = (5**.5 - 1) / 2
+
+    # Figure width in inches
+    fig_width_in = fig_width_pt * inches_per_pt
+    # Figure height in inches
+    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
+
+    return (fig_width_in, fig_height_in)	
+
+fig_width, fig_height = set_size(516.0, fraction=1., subplots=(6, 4))
+fig_width
+fig_height
+
+def plot_individual_scenario(ax, x, y_lr, y_dl, y_err_lr, y_err_dl, 
+							cover_lr, cover_dl, font, title,
+                            show_x_label_and_ticks=False, show_left_y_label_and_ticks=False, show_right_y_label_and_ticks=False):
+	ax1=ax
+	# plot figure 1 with left y axis
+	color = 'tab:red'
+	# ax.plot(x, y, 'o-', linewidth=2)
+	ax1.errorbar(x-0.01, y_lr, yerr=y_err_lr, capsize=5, fmt='-o', color='#ed36d1', label='LR_Bias_ESE')
+	ax1.errorbar(x+0.01, y_dl, yerr=y_err_dl, capsize=5, fmt='-o', color='#0021ff',label='DL_Bias_ESE')
+	# show zero line
+	ax1.axhline(y=0, color='grey', linestyle='-.', linewidth=2)
+
+	# set tick limit and label 
+	ax1.set(xlim=(0, 1), xticks=np.arange(0, 1, 0.05),
+			ylim=(-1, 1), yticks=np.arange(-1, 1, 0.1))
+	ax1.tick_params(axis='both', which='major', labelsize=20)
+	ax1.tick_params(axis='y', labelcolor=color)
+
+	# set axis label
+	if show_x_label_and_ticks:
+		ax1.set_xlabel('Exposure Probability $p_{\omega}$', fontdict=font)
+	# else: # hide ticks
+	# 	ax1.set_xticklabels([])
+	if show_left_y_label_and_ticks:
+		ax1.set_ylabel('Bias', fontdict=font, color=color)
+	# else:
+	# 	ax1.set_yticklabels([])
+
+	# set subfigure title
+	ax1.set_title(title, fontdict={'fontsize':35}, pad=20)
+
+	# plot figure 2 with right y axis
+	ax2 = ax1.twinx()  # instantiate a second Axes that shares the same x-axis
+	color = 'tab:blue'
+
+	ax2.bar(x-0.01, cover_lr, width=0.02, fill=False, hatch='///', 
+			edgecolor="#425bd9", linewidth=1, alpha=0.5, label='LR_Coverage')
+	ax2.bar(x+0.01, cover_dl, width=0.02, fill=False, hatch='..', 
+			edgecolor="#258b52", linewidth=1, alpha=0.5, label='DL_Coverage')
+
+	# set tick limit and label
+	ax2.set(ylim=(0, 1), yticks=np.arange(0, 1, 0.05))
+	ax2.tick_params(axis='y', labelcolor=color)
+	ax2.tick_params(axis='both', which='major', labelsize=20)
+
+	# set axis label
+	if show_right_y_label_and_ticks:
+		ax2.set_ylabel('Coverage', fontdict=font, color=color)  # we already handled the x-label with ax1
+	# else:
+	# 	ax2.set_yticklabels([])
+
+	# add legend
+	# fig.legend(loc='center', bbox_to_anchor=[0.14, 0.89],
+	# 		fontsize=15)
+	# figsize (100, 100)
+	# ax1.legend(loc='center left', bbox_to_anchor=[0.0, 0.97], fontsize=15)
+	# ax2.legend(loc='center left', bbox_to_anchor=[0.0, 0.91], fontsize=15)
+	# # figsize (100, 80)
+	# ax1.legend(loc='center left', bbox_to_anchor=[0.0, 0.96], fontsize=15)
+	# ax2.legend(loc='center left', bbox_to_anchor=[0.0, 0.89], fontsize=15)
+	# figsize (fig_w*10, fig_h*10) 
+	ax1.legend(loc='center left', bbox_to_anchor=[0.0, 0.95], fontsize=15)
+	ax2.legend(loc='center left', bbox_to_anchor=[0.0, 0.87], fontsize=15)
+	
+	# show grid
+	plt.grid(color = 'green', linestyle = '--', linewidth = 0.5)
+
+
+# figure size: (16*6=96, 9*4=36) (100, 45)
+# Set font
+font = {'family': 'serif',
+        'color':  'black',
+        'weight': 'normal',
+        'size': 35,
+        }
+
+
+# fig, axs = plt.subplots(nrows=6, ncols=4, figsize=(60, 55), facecolor='white')
+width = 516 
+fig_w, fig_h = set_size(width, fraction=1., subplots=(6, 4))
+fig, axs = plt.subplots(nrows=6, ncols=4, figsize=(fig_w*10, fig_h*10), facecolor='white')
+# fig, axs = plt.subplots(nrows=6, ncols=4, figsize=(60, 55), facecolor='white')
+for i, network_string in enumerate(networktype):
+	show_x_label_and_ticks, show_left_y_label_and_ticks, show_right_y_label_and_ticks = False, False, False
+	if i//4 == 5: # show x label and ticks for the last row
+		show_x_label_and_ticks = True
+	if i%4 == 0: # show left y label and ticks for the first column
+		show_left_y_label_and_ticks = True
+	if i%4 == 3: # show right y label and ticks for the last column
+		show_right_y_label_and_ticks = True
+
+	plot_individual_scenario(axs[i//4, i%4], x_label, lr_bias_array[i], dl_bias_array[i], lr_ese_array[i], dl_ese_array[i], 
+							 lr_cover_array[i], dl_cover_array[i], font, titles[i],
+							 show_x_label_and_ticks, show_left_y_label_and_ticks, show_right_y_label_and_ticks)
+fig.tight_layout(pad=15, h_pad=6, w_pad=6)
+fig.savefig(save_path + 'bias_cover_combined' + '.png', dpi=100) 
+# dpi is set to 100 instead of 300 because figsize is set with *10
+
+def plot_individual_lcover(ax, x, cover_lr, cover_dl, font,title,
+                            show_x_label_and_ticks=False, show_y_label_and_ticks=False):
+	
+	ax.bar(x-0.01, cover_lr, width=0.02, color='#425bd9', edgecolor="white", linewidth=0.7, label='LR')
+	ax.bar(x+0.01, cover_dl, width=0.02, color='#258b52', edgecolor="white", linewidth=0.7, label='DL')
+
+	# show grid
+	plt.grid(axis='y', color = 'green', linestyle = '--', linewidth = 0.5)
+
+	# set tick limit and label 
+	ax.set(xlim=(0, 1), xticks=np.arange(0, 1, 0.05),
+			ylim=(0, 1), yticks=np.arange(0, 1, 0.1))
+	ax.tick_params(axis='both', which='major', labelsize=20)
+	# set axis label
+	if show_x_label_and_ticks:
+		ax.set_xlabel('Exposure Probability $p_{\omega}$', fontdict=font)
+	if show_y_label_and_ticks:
+		ax.set_ylabel('Coverage', fontdict=font)
+	# add legend
+	ax.legend(loc='upper left', fontsize=15)
+	# set subfigure title
+	ax.set_title(title, fontdict={'fontsize':35}, pad=20)
+
+width = 516 
+fig_w, fig_h = set_size(width, fraction=1., subplots=(6, 4))
+fig, axs = plt.subplots(nrows=6, ncols=4, figsize=(fig_w*10, fig_h*10), facecolor='white')
+# fig, axs = plt.subplots(nrows=6, ncols=4, figsize=(60, 55), facecolor='white')
+for i, network_string in enumerate(networktype):
+	show_x_label_and_ticks, show_y_label_and_ticks = False, False
+	if i//4 == 5: # show x label and ticks for the last row
+		show_x_label_and_ticks = True
+	if i%4 == 0: # show y label and ticks for the first column
+		show_y_label_and_ticks = True
+
+	plot_individual_lcover(axs[i//4, i%4], x_label, lr_lcover_array[i], dl_lcover_array[i], font, titles[i], 
+						   show_x_label_and_ticks, show_y_label_and_ticks)
+fig.tight_layout(pad=15, h_pad=6, w_pad=6)
+fig.savefig(save_path + 'lcover_combined' + '.png', dpi=100) 
+# dpi is set to 100 instead of 300 because figsize is set with *10
