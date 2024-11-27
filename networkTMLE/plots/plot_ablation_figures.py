@@ -218,3 +218,91 @@ def plot_horizontal_bar_abl(metrics, metrics_improvement, font, save_path='./', 
 
 plot_horizontal_bar_abl(metrics, metrics_improvement_uniform, font, save_path=save_path, figure_name='uniform_improvement')
 plot_horizontal_bar_abl(metrics, metrics_improvement_random, font, save_path=save_path, figure_name='random_improvement')
+
+
+# plot combined graphs
+def set_size(width, fraction=1, subplots=(1, 1)):
+    """Set figure dimensions to avoid scaling in LaTeX.
+
+    Parameters
+    ----------
+    width: float or string
+            Document width in points, or string of predined document type
+    fraction: float, optional
+            Fraction of the width which you wish the figure to occupy
+    subplots: array-like, optional
+            The number of rows and columns of subplots.
+    Returns
+    -------
+    fig_dim: tuple
+            Dimensions of figure in inches
+    """
+    if width == 'thesis':
+        width_pt = 426.79135
+    elif width == 'beamer':
+        width_pt = 307.28987
+    else:
+        width_pt = width
+
+    # Width of figure (in pts)
+    fig_width_pt = width_pt * fraction
+    # Convert from pt to inches
+    inches_per_pt = 1 / 72.27
+
+    # Golden ratio to set aesthetic figure height
+    # https://disq.us/p/2940ij3
+    golden_ratio = (5**.5 - 1) / 2
+
+    # Figure width in inches
+    fig_width_in = fig_width_pt * inches_per_pt
+    # Figure height in inches
+    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
+
+    return (fig_width_in, fig_height_in)	
+
+
+def plot_individual_horizontal_bar_abl(ax, metrics, metrics_improvement, font, title):
+    x = np.arange(len(metrics))  # the label locations
+    width = 0.2  # the width of the bars
+    multiplier = 0
+
+    for attribute, measurement in metrics_improvement.items():
+            offset = width * multiplier
+            rects = ax.barh(x + offset, measurement, width, label=attribute)
+            multiplier += 1
+
+    # set tick limit and label
+    ax.set(xlim=(-0.4, 0.4), xticks=np.arange(-0.4, 0.4, 0.05),
+        #    ylim=(0, 4), yticks=x+2*width, yticklabels=metrics)
+           ylim=(-0.2, 4), yticks=x+2*width-0.1, yticklabels=metrics)
+    ax.tick_params(axis='both', which='major', labelsize=20)
+
+    # set axis label
+    ax.set_xlabel('Improvement over benchmark $p_{\omega}$', fontdict=font)
+    # ax.set_ylabel('Improvement over benchmark', fontdict=font)
+    # add legend
+    ax.legend(loc='upper left', fontsize=20)
+    # show zero line
+    ax.axvline(x=0, color='gray', linestyle='-')
+    # show grid
+    ax.grid(color = 'green', linestyle = '--', linewidth = 0.5)
+    # set title
+    ax.set_title(title, fontdict={'fontsize':35}, pad=20)
+
+# Set font
+font = {'family': 'serif',
+        'color':  'black',
+        'weight': 'normal',
+        'size': 35,
+        }
+
+titles = ['Uniform graph scenarios', 'Power-law random graph scenarios']
+improvements = [metrics_improvement_uniform, metrics_improvement_random]
+
+page_width = 516 
+fig_w, fig_h = set_size(page_width, fraction=0.5, subplots=(1, 2))
+fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(fig_w*10, fig_h*10), facecolor='white')
+for i in range(2):
+    plot_individual_horizontal_bar_abl(axs[i], metrics, improvements[i], font, titles[i])
+fig.tight_layout()
+fig.savefig(save_path + 'imp_30vs50_combined' + '.png', dpi=100) 

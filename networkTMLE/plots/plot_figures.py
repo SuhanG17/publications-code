@@ -283,9 +283,13 @@ titles = ['CC: uniform 500', 'CW: uniform 500', 'WC: uniform 500', 'Flexible: un
 # ts='9'
 # save_path='../figures/mode_all/'
 # # mode=top_50; time=10
-dir_path = '../results_csv/mode_top_50/'
+# dir_path = '../results_csv/mode_top_50/'
+# ts='10'
+# save_path='../figures/mode_top_50/'
+# # mode=bottom_50; time=10
+dir_path = '../results_csv/mode_bottom_50/'
 ts='10'
-save_path='../figures/mode_top_50/'
+save_path='../figures/mode_bottom_50/'
 
 # load csv data for LR
 lr_bias = pd.read_csv(dir_path+'LR_bias_ts'+ts+'.csv', header=None)
