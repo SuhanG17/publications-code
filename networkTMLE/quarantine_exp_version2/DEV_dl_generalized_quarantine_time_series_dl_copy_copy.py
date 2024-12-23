@@ -25,8 +25,8 @@ from dl_trainer_time_series_UDA import MLPTS_UDA
 # Setting simulation parameters
 ############################################
 # n_mc = 500
-n_mc = 15
-# n_mc = 1
+# n_mc = 15
+n_mc = 1
 
 exposure = "quarantine"
 outcome = "D"
@@ -43,7 +43,7 @@ args = parser.parse_args()
 # # test run with dummy args
 # class Args(object):
 #     def __init__(self):
-#         self.task_string = '20040'
+#         self.task_string = '70040'
 #         self.use_deep_learner_outcome = False
 # args = Args()
 
@@ -218,233 +218,233 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 ########################################
 # Running simulation
 ########################################
-for i in range(n_mc):
-    # i=10
-    print(f'simulation {i}')
-    ######## inside for loop ########
-    # Generating Data
-    # H = vaccine_dgm(network=G, restricted=restrict)
-    H, network_list, cat_vars_i, cont_vars_i, cat_unique_levels_i  = quarantine_dgm_time_series(network=G, restricted=restrict, 
-                                                                                                time_limit=10, inf_duration=5, quarantine_period=quarantine_period,
-                                                                                                update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
-                                                                                                random_seed=seed_number+i)
-    df = network_to_df(H)
-    results.loc[i, 'inc_'+exposure] = np.mean(df[exposure])
-    results.loc[i, 'inc_'+outcome] = np.mean(df[outcome])
+# for i in range(n_mc):
+i=7
+print(f'simulation {i}')
+######## inside for loop ########
+# Generating Data
+# H = vaccine_dgm(network=G, restricted=restrict)
+H, network_list, cat_vars_i, cont_vars_i, cat_unique_levels_i  = quarantine_dgm_time_series(network=G, restricted=restrict, 
+                                                                                            time_limit=10, inf_duration=5, quarantine_period=quarantine_period,
+                                                                                            update_split=True, cat_vars=cat_vars, cont_vars=cont_vars, cat_unique_levels=cat_unique_levels,
+                                                                                            random_seed=seed_number+i)
+df = network_to_df(H)
+results.loc[i, 'inc_'+exposure] = np.mean(df[exposure])
+results.loc[i, 'inc_'+outcome] = np.mean(df[outcome])
 
+if shift:
+    # Generating probabilities (true) to assign
+    adj_matrix = nx.adjacency_matrix(H, weight=None)
+    df['A_sum'] = fast_exp_map(adj_matrix, np.array(df['A']), measure='sum')
+    df['H_sum'] = fast_exp_map(adj_matrix, np.array(df['H']), measure='sum')
+    df = pd.merge(df, pd.DataFrame.from_dict(dict(G.degree),
+                                                orient='index').rename(columns={0: 'degree'}),
+                    how='left', left_index=True, right_index=True)
+    df['I_sum'] = fast_exp_map(adj_matrix, np.array(df['I']), measure='sum')
+    df['I_ratio'] = df['I_sum'] / df['degree'] # ratio of infected neighbors
+    prob = logistic.cdf(- 4.5 
+                        + 1.2*df['A'] + 0.8*df['H']
+                        + 0.5*df['H_sum'] + 0.3*df['A_sum'] 
+                        + 1.2*df['I_ratio'])
+    log_odds = np.log(probability_to_odds(prob))
+
+# Network TMLE
+# use deep learner for given nuisance model
+ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict,
+                                task_string=args.task_string,
+                                cat_vars=cat_vars_i, cont_vars=cont_vars_i, cat_unique_levels=cat_unique_levels_i,
+                                use_deep_learner_A_i=use_deep_learner_A_i, 
+                                use_deep_learner_A_i_s=use_deep_learner_A_i_s, 
+                                use_deep_learner_outcome=use_deep_learner_outcome,
+                                use_all_time_slices=False) 
+
+if model in ["cw", "wc"]:
+    ntmle.define_threshold(variable='H', threshold=2, definition='sum')
+if model == "np":
+    if mode == 'all':
+        if network == "uniform":
+            if n_nodes == 500:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+            elif n_nodes == 1000:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+            else:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+        elif network == "random":
+            if n_nodes == 500:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+            elif n_nodes == 1000:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+            else:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
+        else:
+            raise ValueError("Invalid model-network combo")
+    elif mode == 'top':
+        if network == "uniform":
+            if n_nodes == 500:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+            elif n_nodes == 1000:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+            else:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+        elif network == "random":
+            if n_nodes == 500:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+            elif n_nodes == 1000:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
+            else:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
+        else:
+            raise ValueError("Invalid model-network combo")
+    elif mode == 'bottom':
+        if network == "uniform":
+            if n_nodes == 500:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+            elif n_nodes == 1000:
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+            else:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+        elif network == "random":
+            if n_nodes == 500:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+            elif n_nodes == 1000:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
+            else:
+                # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
+        else:
+            raise ValueError("Invalid model-network combo")
+    else:
+        raise ValueError("Invalid mode")
+        
+# ntmle.exposure_model(gin_model)
+# ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
+# ntmle.outcome_model(qn_model, custom_model=q_estimator)
+
+# use deep learner
+def get_deep_learner(deep_learner_type, device):
+    '''Return deep learner model based on the type of deep learner'''
+    if deep_learner_type == 'mlp':
+        split_ratio = [0.8, 0.2]
+        deep_learner = MLPTS_UDA(split_ratio=split_ratio, batch_size=16, shuffle=True, n_splits=1, predict_all=True,
+                                    epochs=20, print_every=5, device=device, save_path='./tmp.pth',
+                                    lin_hidden=None, 
+                                    lin_hidden_temporal=nn.ModuleList([nn.Linear(128, 256), nn.Linear(256, 128)]), 
+                                    class_classifier=nn.Sequential(nn.Linear(32, 16), nn.ReLU(),
+                                                                nn.Linear(16, 8), nn.ReLU(),
+                                                                nn.Linear(8, 2)),
+                                    domain_classifier=nn.Sequential(nn.Linear(1*32, 16), nn.ReLU(), 
+                                                                    nn.Linear(16, 8), nn.ReLU(), 
+                                                                    nn.Linear(8, 2)))
+    elif deep_learner_type == 'gcn':
+        pass
+    elif deep_learner_type == 'cnn':
+        pass
+    else:
+        raise NotImplementedError("Invalid deep learner type. Choose from 'mlp', 'gcn', 'cnn'")
+    return deep_learner
+
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+# device = 'cpu'
+print(device)
+
+if use_deep_learner_A_i:
+    deep_learner_a_i = get_deep_learner(deep_learner_type, device)
+else:
+    deep_learner_a_i = None
+    print(f'No deep learner for A_i model')
+
+if use_deep_learner_A_i_s:
+    deep_learner_a_i_s = get_deep_learner(deep_learner_type, device)
+else:
+    deep_learner_a_i_s  = None
+    print(f'No deep learner for A_i_s model')
+        
+if use_deep_learner_outcome:
+    deep_learner_outcome = get_deep_learner(deep_learner_type, device)
+else:
+    deep_learner_outcome = None
+    print(f'No deep learner for outcome model')
+
+ntmle.exposure_model(gin_model, custom_model=deep_learner_a_i) 
+ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=deep_learner_a_i_s)
+if q_estimator is not None:
+    ntmle.outcome_model(qn_model, custom_model=q_estimator) 
+else:
+    ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome)
+
+# Report outcome model accuracy for Linear Regression model
+# LogsticRegression model does not set _outcome_model but _q_custom_
+if not use_deep_learner_outcome and q_estimator is None:
+    ntmle._outcome_model.summary()
+
+# p=0.45
+
+for p in prop_treated:  # loops through all treatment plans
+    print(f'p={p}')
+    # try:
     if shift:
-        # Generating probabilities (true) to assign
-        adj_matrix = nx.adjacency_matrix(H, weight=None)
-        df['A_sum'] = fast_exp_map(adj_matrix, np.array(df['A']), measure='sum')
-        df['H_sum'] = fast_exp_map(adj_matrix, np.array(df['H']), measure='sum')
-        df = pd.merge(df, pd.DataFrame.from_dict(dict(G.degree),
-                                                 orient='index').rename(columns={0: 'degree'}),
-                        how='left', left_index=True, right_index=True)
-        df['I_sum'] = fast_exp_map(adj_matrix, np.array(df['I']), measure='sum')
-        df['I_ratio'] = df['I_sum'] / df['degree'] # ratio of infected neighbors
-        prob = logistic.cdf(- 4.5 
-                            + 1.2*df['A'] + 0.8*df['H']
-                            + 0.5*df['H_sum'] + 0.3*df['A_sum'] 
-                            + 1.2*df['I_ratio'])
-        log_odds = np.log(probability_to_odds(prob))
-
-    # Network TMLE
-    # use deep learner for given nuisance model
-    ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict,
-                                    task_string=args.task_string,
-                                    cat_vars=cat_vars_i, cont_vars=cont_vars_i, cat_unique_levels=cat_unique_levels_i,
-                                    use_deep_learner_A_i=use_deep_learner_A_i, 
-                                    use_deep_learner_A_i_s=use_deep_learner_A_i_s, 
-                                    use_deep_learner_outcome=use_deep_learner_outcome,
-                                    use_all_time_slices=False) 
-
-    if model in ["cw", "wc"]:
-        ntmle.define_threshold(variable='H', threshold=2, definition='sum')
-    if model == "np":
-        if mode == 'all':
-            if network == "uniform":
-                if n_nodes == 500:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
-                elif n_nodes == 1000:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                else:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-            elif network == "random":
-                if n_nodes == 500:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-                elif n_nodes == 1000:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
-                else:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
-            else:
-                raise ValueError("Invalid model-network combo")
-        elif mode == 'top':
-            if network == "uniform":
-                if n_nodes == 500:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
-                elif n_nodes == 1000:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                else:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-            elif network == "random":
-                if n_nodes == 500:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-                elif n_nodes == 1000:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
-                else:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
-            else:
-                raise ValueError("Invalid model-network combo")
-        elif mode == 'bottom':
-            if network == "uniform":
-                if n_nodes == 500:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
-                elif n_nodes == 1000:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                else:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-            elif network == "random":
-                if n_nodes == 500:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-                elif n_nodes == 1000:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
-                else:
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
-                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
-            else:
-                raise ValueError("Invalid model-network combo")
-        else:
-            raise ValueError("Invalid mode")
-            
-    # ntmle.exposure_model(gin_model)
-    # ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
-    # ntmle.outcome_model(qn_model, custom_model=q_estimator)
-
-    # use deep learner
-    def get_deep_learner(deep_learner_type, device):
-        '''Return deep learner model based on the type of deep learner'''
-        if deep_learner_type == 'mlp':
-            split_ratio = [0.8, 0.2]
-            deep_learner = MLPTS_UDA(split_ratio=split_ratio, batch_size=16, shuffle=True, n_splits=1, predict_all=True,
-                                     epochs=20, print_every=5, device=device, save_path='./tmp.pth',
-                                     lin_hidden=None, 
-                                     lin_hidden_temporal=nn.ModuleList([nn.Linear(128, 256), nn.Linear(256, 128)]), 
-                                     class_classifier=nn.Sequential(nn.Linear(32, 16), nn.ReLU(),
-                                                                    nn.Linear(16, 8), nn.ReLU(),
-                                                                    nn.Linear(8, 2)),
-                                     domain_classifier=nn.Sequential(nn.Linear(1*32, 16), nn.ReLU(), 
-                                                                     nn.Linear(16, 8), nn.ReLU(), 
-                                                                     nn.Linear(8, 2)))
-        elif deep_learner_type == 'gcn':
-            pass
-        elif deep_learner_type == 'cnn':
-            pass
-        else:
-            raise NotImplementedError("Invalid deep learner type. Choose from 'mlp', 'gcn', 'cnn'")
-        return deep_learner
-
-
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    # device = 'cpu'
-    print(device)
-
-    if use_deep_learner_A_i:
-        deep_learner_a_i = get_deep_learner(deep_learner_type, device)
+        z = odds_to_probability(np.exp(log_odds + p))
+        ntmle.fit(p=z, bound=0.01, seed=seed_number+i, 
+                    shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration, 
+                    T_in_id=T_in_id, T_out_id=T_out_id)
     else:
-        deep_learner_a_i = None
-        print(f'No deep learner for A_i model')
-
-    if use_deep_learner_A_i_s:
-        deep_learner_a_i_s = get_deep_learner(deep_learner_type, device)
-    else:
-        deep_learner_a_i_s  = None
-        print(f'No deep learner for A_i_s model')
-            
-    if use_deep_learner_outcome:
-        deep_learner_outcome = get_deep_learner(deep_learner_type, device)
-    else:
-        deep_learner_outcome = None
-        print(f'No deep learner for outcome model')
-
-    ntmle.exposure_model(gin_model, custom_model=deep_learner_a_i) 
-    ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs, custom_model=deep_learner_a_i_s)
-    if q_estimator is not None:
-        ntmle.outcome_model(qn_model, custom_model=q_estimator) 
-    else:
-        ntmle.outcome_model(qn_model, custom_model=deep_learner_outcome)
-    
-    # Report outcome model accuracy for Linear Regression model
-    # LogsticRegression model does not set _outcome_model but _q_custom_
-    if not use_deep_learner_outcome and q_estimator is None:
-        ntmle._outcome_model.summary()
-
-    # p=0.45
-
-    for p in prop_treated:  # loops through all treatment plans
-        print(f'p={p}')
-        try:
-            if shift:
-                z = odds_to_probability(np.exp(log_odds + p))
-                ntmle.fit(p=z, bound=0.01, seed=seed_number+i, 
-                          shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration, 
-                          T_in_id=T_in_id, T_out_id=T_out_id)
-            else:
-                ntmle.fit(p=p, samples=10, bound=0.01, seed=seed_number+i,
-                          shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration,
-                          T_in_id=T_in_id, T_out_id=T_out_id)
-            results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
-            results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
-            results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
-            results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
-            results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
-            results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
-            results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
-        except:
-            results.loc[i, 'bias_'+str(p)] = np.nan
-            results.loc[i, 'var_'+str(p)] = np.nan
-            results.loc[i, 'lcl_'+str(p)] = np.nan
-            results.loc[i, 'ucl_'+str(p)] = np.nan
-            results.loc[i, 'varl_'+str(p)] = np.nan
-            results.loc[i, 'lcll_'+str(p)] = np.nan
-            results.loc[i, 'ucll_'+str(p)] = np.nan
-    ####### inside for loop ########
-    print()
+        ntmle.fit(p=p, samples=10, bound=0.01, seed=seed_number+i,
+                    shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration,
+                    T_in_id=T_in_id, T_out_id=T_out_id)
+    results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
+    results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
+    results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
+    results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
+    results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
+    results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
+    results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
+    # except:
+    #     results.loc[i, 'bias_'+str(p)] = np.nan
+    #     results.loc[i, 'var_'+str(p)] = np.nan
+    #     results.loc[i, 'lcl_'+str(p)] = np.nan
+    #     results.loc[i, 'ucl_'+str(p)] = np.nan
+    #     results.loc[i, 'varl_'+str(p)] = np.nan
+    #     results.loc[i, 'lcll_'+str(p)] = np.nan
+    #     results.loc[i, 'ucll_'+str(p)] = np.nan
+####### inside for loop ########
+print()
 
     # ########################################
     # # Saving results
@@ -488,8 +488,9 @@ for i in range(n_mc):
 # data = ntmle.pooled_data_restricted_list[-1] 
 # # data = pooled_data_restricted_list[-1] 
 
-# var_name = 'H_sum'
+# var_name = 'A_sum'
 # data[var_name].unique()
+# data[var_name].value_counts()
 
 # variables = [var_name]
 # # bins = [[0, 1, 3]]
@@ -520,6 +521,7 @@ for i in range(n_mc):
 #              labels=l,
 #              include_lowest=True).astype(float)
 # out.unique()
+# out.value_counts()
 
 # import statsmodels.api as sm
 

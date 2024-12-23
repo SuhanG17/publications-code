@@ -136,8 +136,10 @@ class NetworkTMLETimeSeries:
 
     Sofrygin O, Ogburn EL, & van der Laan MJ. (2018). Single Time Point Interventions in Network-Dependent
     Data. In Targeted Learning in Data Science (pp. 373-396). Springer.
+
+    _gs_measure_ is repetitively given in the _init_() because the self._nonparam_cols_ should not be calculated, if _gs_measure_ is not None (SG_modified)
     """
-    def __init__(self, network_list, exposure, outcome, degree_restrict=None, alpha=0.05,
+    def __init__(self, network_list, exposure, outcome, degree_restrict=None, alpha=0.05, _gs_measure_='sum',
                  continuous_bound=0.0005, verbose=False,
                  task_string='00000', parallel_id=None,
                  cat_vars=[], cont_vars=[], cat_unique_levels={},
@@ -235,38 +237,41 @@ class NetworkTMLETimeSeries:
                     if v+'_'+summary_measure not in self.cont_vars:
                         self.cont_vars.append(v+'_'+summary_measure)                                # ... add to continuous variables (SG_modified)
 
-        # Creating summary measure mappings for non-parametric exposure_map_model()
-        self._nonparam_cols_ = []
-        for i in range(len(self.network_list)):
-            exp_map_cols = exp_map_individual(network=self.network_list[i],                         # Generate columns of indicator
-                                              variable=exposure,                                    # ... for the exposure
-                                              max_degree=self._max_degree_list_[i])                 # ... up to the maximum degree
-            self._nonparam_cols_.append(list(exp_map_cols.columns))                                 # Save column list for estimation procedure
-            df_list[i] = pd.merge(df_list[i],                                                       # Merge these columns into main data
-                                  exp_map_cols.fillna(0),                                           # set nan to 0 to keep same dimension across i
-                                  how='left', left_index=True, right_index=True)                    # Merge on index to left
+        if _gs_measure_ is None:
+            # Start
+            # Creating summary measure mappings for non-parametric exposure_map_model()
+            self._nonparam_cols_ = []
+            for i in range(len(self.network_list)):
+                exp_map_cols = exp_map_individual(network=self.network_list[i],                         # Generate columns of indicator
+                                                variable=exposure,                                    # ... for the exposure
+                                                max_degree=self._max_degree_list_[i])                 # ... up to the maximum degree
+                self._nonparam_cols_.append(list(exp_map_cols.columns))                                 # Save column list for estimation procedure
+                df_list[i] = pd.merge(df_list[i],                                                       # Merge these columns into main data
+                                    exp_map_cols.fillna(0),                                           # set nan to 0 to keep same dimension across i
+                                    how='left', left_index=True, right_index=True)                    # Merge on index to left
 
-        # Assign all mappings variables  (SG_modified)
-        # summary measures are consistent throughout time, hence all var names can be added to self.cat_vars/cont_vars
-        # but the mapping values from neighbors may not be consistent, choose the maximum degree mapping to ensure inclusiveness
-        if exposure in cat_vars:
-            # print('categorical')
-            self.cat_vars.extend(self._nonparam_cols_[-1]) # add all mappings to categorical variables
+            # Assign all mappings variables  (SG_modified)
+            # summary measures are consistent throughout time, hence all var names can be added to self.cat_vars/cont_vars
+            # but the mapping values from neighbors may not be consistent, choose the maximum degree mapping to ensure inclusiveness
+            if exposure in cat_vars:
+                # print('categorical')
+                self.cat_vars.extend(self._nonparam_cols_[-1]) # add all mappings to categorical variables
 
-            for i in range(len(self._nonparam_cols_)):
-                if i == 0: # init with the first time slice values
-                    for col in self._nonparam_cols_[i]:
-                        self.cat_unique_levels[col] = pd.unique(df_list[i][col].astype('int')).max() + 1
-                else: # update when bigger degree is encountered
-                    for col in self._nonparam_cols_[i]: 
-                        if pd.unique(df_list[i][col].astype('int')).max() + 1 > self.cat_unique_levels[col]:
+                for i in range(len(self._nonparam_cols_)):
+                    if i == 0: # init with the first time slice values
+                        for col in self._nonparam_cols_[i]:
                             self.cat_unique_levels[col] = pd.unique(df_list[i][col].astype('int')).max() + 1
+                    else: # update when bigger degree is encountered
+                        for col in self._nonparam_cols_[i]: 
+                            if pd.unique(df_list[i][col].astype('int')).max() + 1 > self.cat_unique_levels[col]:
+                                self.cat_unique_levels[col] = pd.unique(df_list[i][col].astype('int')).max() + 1
 
-        elif exposure in cont_vars:
-            # print('continuous')
-           self.cont_vars.extend(self._nonparam_cols_[-1])
-        else:
-            raise ValueError('exposure is neither assigned to categorical or continuous variables')
+            elif exposure in cont_vars:
+                # print('continuous')
+                self.cont_vars.extend(self._nonparam_cols_[-1])
+            else:
+                raise ValueError('exposure is neither assigned to categorical or continuous variables')
+            # End
 
         # Calculating degree for all the nodes
         self.df_list = [None] * len(df_list) # init self.df_list
@@ -523,6 +528,15 @@ class NetworkTMLETimeSeries:
                 data = patsy.dmatrix(model + ' - 1',                              # Specified model WITHOUT an intercept
                                     self.df_restricted_list[-1])                  # ... using the degree restricted data
 
+                # print(f'Observed data shape: {data.shape}')
+                # print('unique values H_sum')
+                # print(self.df_restricted_list[-1]['H_sum'].unique())
+                # print('values counts H_sum')
+                # print(self.df_restricted_list[-1]['H_sum'].value_counts())
+                # tmp_df = patsy.dmatrix(model + ' - 1', self.df_restricted_list[-1], return_type="dataframe")
+                # print(tmp_df.columns) 
+                # print(data)
+
                 # Estimating custom_model
                 self._q_custom_ = outcome_learner_fitting(ml_model=custom_model,                                    # User-specified model
                                                           xdata=np.asarray(data),                                   # Extracted X data
@@ -710,6 +724,13 @@ class NetworkTMLETimeSeries:
                 pass
             else:
                 d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted_list[-1])  # ... extract data via patsy
+                # print(f'Pooled data shape: {d.shape}')
+                # print('unique values H_sum')
+                # print(pooled_data_restricted_list[-1]['H_sum'].unique())
+                # print('values counts H_sum')
+                # print(pooled_data_restricted_list[-1]['H_sum'].value_counts())
+                # tmp_df = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted_list[-1], return_type='dataframe')
+                # print(tmp_df.columns)
                 self.y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,              # ... predict using custom function
                                                 xdata=np.asarray(d))                        # ... for the extracted data
                 label = pooled_data_restricted_list[-1][self.outcome]
@@ -813,7 +834,7 @@ class NetworkTMLETimeSeries:
                                                             obs_y=y_,                            # ... observed value of Y
                                                             pred_y=yq0_,                         # ... predicted value of Y
                                                             adj_matrix=self.adj_matrix_list[-1],
-                                                            excluded_ids=self._exclude_ids_degree_)
+                                                            excluded_ids=self._exclude_ids_degree_[-1] if self._exclude_ids_degree_ is not None else self._exclude_ids_degree_)
             self.conditional_latent_variance = var_lcond                                            # Store variance estimate and CIs
             self.conditional_latent_ci = [self.marginal_outcome - zalpha*np.sqrt(var_lcond),
                                         self.marginal_outcome + zalpha*np.sqrt(var_lcond)]

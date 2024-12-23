@@ -698,6 +698,10 @@ class NetworkTMLETimeSeries:
                 d = patsy.dmatrix(self._q_model + ' - 1', pooled_data_restricted_list[-1])  # ... extract data via patsy
                 self.y_star = outcome_learner_predict(ml_model_fit=self._q_custom_,              # ... predict using custom function
                                                 xdata=np.asarray(d))                        # ... for the extracted data
+                label = pooled_data_restricted_list[-1][self.outcome]
+                pred_binary = np.round(self.y_star)
+                acc = (pred_binary == label).sum().item()/label.shape[0]
+                print(f'Outcome model accuracy in pooled data: {acc}')
         
             
         # Ensure all predicted values are bounded properly for continuous

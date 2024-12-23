@@ -220,7 +220,7 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 # Running simulation
 ########################################
 for i in range(n_mc):
-    # i=10
+    # i=1
     print(f'simulation {i}')
     ######## inside for loop ########
     # Generating Data
@@ -251,7 +251,7 @@ for i in range(n_mc):
 
     # Network TMLE
     # use deep learner for given nuisance model
-    ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict,
+    ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict, _gs_measure_=measure_gs,
                                     task_string=args.task_string, parallel_id=parallel_id,
                                     cat_vars=cat_vars_i, cont_vars=cont_vars_i, cat_unique_levels=cat_unique_levels_i,
                                     use_deep_learner_A_i=use_deep_learner_A_i, 
@@ -277,11 +277,15 @@ for i in range(n_mc):
                     # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
             elif network == "random":
                 if n_nodes == 500:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-                elif n_nodes == 1000:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
                     ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 18], labels=False)
+                elif n_nodes == 1000:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False) 
                 else:
                     # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
                     # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
@@ -417,7 +421,7 @@ for i in range(n_mc):
     if not use_deep_learner_outcome and q_estimator is None:
         ntmle._outcome_model.summary()
 
-    # p=0.45
+    # p=0.05
 
     for p in prop_treated:  # loops through all treatment plans
         print(f'p={p}')
@@ -463,8 +467,8 @@ for i in range(n_mc):
     #     else:
     #         results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", mode='a', index=False)
 
-# TEST BEGIN
-# samples = 10
+# # TEST BEGIN
+# samples = 1
 # seed = seed_number+i
 # pooled_data_restricted_list, pooled_adj_matrix_list = ntmle._generate_pooled_samples(samples=samples,
 #                                                                                     seed=seed,
@@ -489,17 +493,19 @@ for i in range(n_mc):
 
 # data = ntmle.df_restricted_list[-1]
 # data = ntmle.pooled_data_restricted_list[-1] 
-# # data = pooled_data_restricted_list[-1] 
+# # # # data = pooled_data_restricted_list[-1] 
 
 # var_name = 'H_sum'
 # data[var_name].unique()
+# data[var_name].value_counts()
 
 # variables = [var_name]
 # # bins = [[0, 1, 3]]
 # # bins = [[0, 1, 2, 6]]
-# # bins = [[0, 1, 2, 4, 10]]
-# # bins = [[0, 1, 2, 10]]
-# # bins = [[0, 1, 2, 4, 7, 18]]
+# bins = [[0, 1, 2, 4, 10]]
+# bins = [[0, 1, 2, 10]]
+# bins = [[0, 1, 2, 4, 7, 18]]
+# bins = [[0, 1, 2, 4, 18]]
 # # bins = [[0, 1, 5]]
 # # bins = [[0, 1, 2, 3, 6]]
 # # bins = [[0, 1, 2, 10]]
@@ -517,12 +523,19 @@ for i in range(n_mc):
 #     print(v)
 #     print(b)
 #     print(l)
+#     # col_label = v + '_c'
+#     # data[col_label] = pd.cut(data[v],
+#     #                          bins=b,
+#     #                          labels=l,
+#     #                          include_lowest=True).astype(float)
 
 # out = pd.cut(data[v],
 #              bins=b,
 #              labels=l,
 #              include_lowest=True).astype(float)
 # out.unique()
+# out.value_counts()
+
 
 # import statsmodels.api as sm
 
