@@ -271,10 +271,10 @@ for i in range(n_mc):
                     ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
                     ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
                 else:
-                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
                     # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
             elif network == "random":
                 if n_nodes == 500:
                     # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)

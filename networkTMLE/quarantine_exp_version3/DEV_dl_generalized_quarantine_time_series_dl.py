@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 from dl_trainer_time_series_UDA import MLPTS_UDA
 
+# Excel sheet: no shift_mode=all_t=9
 ############################################
 # Setting simulation parameters
 ############################################
@@ -29,6 +30,7 @@ n_mc = 30
 
 exposure = "quarantine"
 outcome = "D"
+parallel_id = 0
 
 ########################################
 # Running through logic from .sh script
@@ -42,8 +44,8 @@ args = parser.parse_args()
 # # test run with dummy args
 # class Args(object):
 #     def __init__(self):
-#         self.task_string = '10010'
-#         self.use_deep_learner_outcome = True
+#         self.task_string = '20040'
+#         self.use_deep_learner_outcome = False
 # args = Args()
 
 
@@ -63,7 +65,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # choose which what-if mechanism to test
-mode = 'top'
+mode = 'all'
 percent_candidates = 0.5
 quarantine_period = 2
 inf_duration = 5
@@ -81,7 +83,8 @@ use_deep_learner_outcome = args.use_deep_learner_outcome
 # lr bias: 0.5108185131009413
 
 
-T_in_id = [6, 7, 8, 9]
+# T_in_id = [6, 7, 8, 9]
+T_in_id = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 # T_in_id = [8, 9]
 T_out_id = [9]
 
@@ -217,6 +220,7 @@ results = pd.DataFrame(index=range(n_mc), columns=cols)
 # Running simulation
 ########################################
 for i in range(n_mc):
+    # i=1
     print(f'simulation {i}')
     ######## inside for loop ########
     # Generating Data
@@ -247,8 +251,8 @@ for i in range(n_mc):
 
     # Network TMLE
     # use deep learner for given nuisance model
-    ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict,
-                                    task_string=args.task_string,
+    ntmle = NetworkTMLETimeSeries(network_list, exposure='quarantine', outcome='D', verbose=False, degree_restrict=degree_restrict, _gs_measure_=measure_gs,
+                                    task_string=args.task_string, parallel_id=parallel_id,
                                     cat_vars=cat_vars_i, cont_vars=cont_vars_i, cat_unique_levels=cat_unique_levels_i,
                                     use_deep_learner_A_i=use_deep_learner_A_i, 
                                     use_deep_learner_A_i_s=use_deep_learner_A_i_s, 
@@ -258,28 +262,103 @@ for i in range(n_mc):
     if model in ["cw", "wc"]:
         ntmle.define_threshold(variable='H', threshold=2, definition='sum')
     if model == "np":
-        if network == "uniform":
-            if n_nodes == 500:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
-            elif n_nodes == 1000:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+        if mode == 'all':
+            if network == "uniform":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+            elif network == "random":
+                if n_nodes == 500:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 18], labels=False)
+                elif n_nodes == 1000:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False) 
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
             else:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
-        elif network == "random":
-            if n_nodes == 500:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
-            elif n_nodes == 1000:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                raise ValueError("Invalid model-network combo")
+        elif mode == 'top':
+            if network == "uniform":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+            elif network == "random":
+                if n_nodes == 500:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
             else:
-                ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
-                ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                raise ValueError("Invalid model-network combo")
+        elif mode == 'bottom':
+            if network == "uniform":
+                if n_nodes == 500:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 3], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 6], labels=False)
+                elif n_nodes == 1000:
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 5], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 6], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 6], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6], labels=False)
+            elif network == "random":
+                if n_nodes == 500:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 4, 10], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 4, 7, 18], labels=False)
+                elif n_nodes == 1000:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 8, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 26], labels=False)
+                else:
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 4, 5, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 9, 26], labels=False)
+                    # ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 3, 10], labels=False)
+                    # ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 4, 6, 26], labels=False)
+                    ntmle.define_category(variable='A_sum', bins=[0, 1, 2, 10], labels=False)
+                    ntmle.define_category(variable='H_sum', bins=[0, 1, 2, 3, 26], labels=False)
+            else:
+                raise ValueError("Invalid model-network combo")
         else:
-            raise ValueError("Invalid model-network combo")
+            raise ValueError("Invalid mode")
+            
     # ntmle.exposure_model(gin_model)
     # ntmle.exposure_map_model(gsn_model, measure=measure_gs, distribution=distribution_gs)
     # ntmle.outcome_model(qn_model, custom_model=q_estimator)
@@ -342,37 +421,173 @@ for i in range(n_mc):
     if not use_deep_learner_outcome and q_estimator is None:
         ntmle._outcome_model.summary()
 
-    # p=0.75
+    # p=0.05
 
     for p in prop_treated:  # loops through all treatment plans
         print(f'p={p}')
-        try:
-            if shift:
-                z = odds_to_probability(np.exp(log_odds + p))
-                ntmle.fit(p=z, bound=0.01, seed=seed_number+i, 
-                          shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration, 
-                          T_in_id=T_in_id, T_out_id=T_out_id)
-            else:
-                ntmle.fit(p=p, samples=10, bound=0.01, seed=seed_number+i,
-                          shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration,
-                          T_in_id=T_in_id, T_out_id=T_out_id)
-            results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
-            results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
-            results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
-            results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
-            results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
-            results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
-            results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
-        except:
-            results.loc[i, 'bias_'+str(p)] = np.nan
-            results.loc[i, 'var_'+str(p)] = np.nan
-            results.loc[i, 'lcl_'+str(p)] = np.nan
-            results.loc[i, 'ucl_'+str(p)] = np.nan
-            results.loc[i, 'varl_'+str(p)] = np.nan
-            results.loc[i, 'lcll_'+str(p)] = np.nan
-            results.loc[i, 'ucll_'+str(p)] = np.nan
+        # try:
+        if shift:
+            z = odds_to_probability(np.exp(log_odds + p))
+            ntmle.fit(p=z, bound=0.01, seed=seed_number+i, 
+                        shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration, 
+                        T_in_id=T_in_id, T_out_id=T_out_id)
+        else:
+            ntmle.fit(p=p, samples=10, bound=0.01, seed=seed_number+i,
+                        shift=shift, mode=mode, percent_candidates=percent_candidates, quarantine_period=quarantine_period, inf_duration=inf_duration,
+                        T_in_id=T_in_id, T_out_id=T_out_id)
+        results.loc[i, 'bias_'+str(p)] = ntmle.marginal_outcome - truth[p]
+        results.loc[i, 'var_'+str(p)] = ntmle.conditional_variance
+        results.loc[i, 'lcl_'+str(p)] = ntmle.conditional_ci[0]
+        results.loc[i, 'ucl_'+str(p)] = ntmle.conditional_ci[1]
+        results.loc[i, 'varl_'+str(p)] = ntmle.conditional_latent_variance
+        results.loc[i, 'lcll_'+str(p)] = ntmle.conditional_latent_ci[0]
+        results.loc[i, 'ucll_'+str(p)] = ntmle.conditional_latent_ci[1]
+        # except:
+        #     results.loc[i, 'bias_'+str(p)] = np.nan
+        #     results.loc[i, 'var_'+str(p)] = np.nan
+        #     results.loc[i, 'lcl_'+str(p)] = np.nan
+        #     results.loc[i, 'ucl_'+str(p)] = np.nan
+        #     results.loc[i, 'varl_'+str(p)] = np.nan
+        #     results.loc[i, 'lcll_'+str(p)] = np.nan
+        #     results.loc[i, 'ucll_'+str(p)] = np.nan
     ####### inside for loop ########
     print()
+
+    # ########################################
+    # # Saving results
+    # ########################################
+    # if i == 0:
+    #     if use_deep_learner_outcome:
+    #         results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + ".csv", mode='w', index=False)
+    #     else:
+    #         results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", mode='w', index=False)
+    # else:
+    #     if use_deep_learner_outcome:
+    #         results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + ".csv", mode='a', index=False)
+    #     else:
+    #         results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", mode='a', index=False)
+
+# # TEST BEGIN
+# samples = 1
+# seed = seed_number+i
+# pooled_data_restricted_list, pooled_adj_matrix_list = ntmle._generate_pooled_samples(samples=samples,
+#                                                                                     seed=seed,
+#                                                                                     shift=shift,
+#                                                                                     mode=mode,
+#                                                                                     percent_candidates=percent_candidates,
+#                                                                                     pr_a=p,
+#                                                                                     quarantine_period=quarantine_period,
+#                                                                                     inf_duration=inf_duration)
+
+
+# import patsy
+# obs_d = patsy.dmatrix(ntmle._q_model + ' - 1', ntmle.df_restricted_list[-1], return_type='dataframe') 
+# obs_d.columns
+# obs_d_array = np.array(obs_d)
+# obs_d_array.shape
+
+# d = patsy.dmatrix(ntmle._q_model + ' - 1', ntmle.pooled_data_restricted_list[-1], return_type='dataframe')
+# d.columns
+# d_array = np.array(d)
+# d_array.shape
+
+# data = ntmle.df_restricted_list[-1]
+# data = ntmle.pooled_data_restricted_list[-1] 
+# # # # data = pooled_data_restricted_list[-1] 
+
+# var_name = 'H_sum'
+# data[var_name].unique()
+# data[var_name].value_counts()
+
+# variables = [var_name]
+# # bins = [[0, 1, 3]]
+# # bins = [[0, 1, 2, 6]]
+# bins = [[0, 1, 2, 4, 10]]
+# bins = [[0, 1, 2, 10]]
+# bins = [[0, 1, 2, 4, 7, 18]]
+# bins = [[0, 1, 2, 4, 18]]
+# # bins = [[0, 1, 5]]
+# # bins = [[0, 1, 2, 3, 6]]
+# # bins = [[0, 1, 2, 10]]
+# # bins = [[0, 1, 2, 3, 4, 8, 26]]
+# # bins = [[0, 1, 2, 3, 6]]
+# # bins = [[0, 1, 2, 6]]
+# # bins = [[0, 1, 2, 3, 4, 6]]
+# # bins = [[0, 1, 2, 3, 4, 5, 10]]
+# bins = [[0, 1, 2, 3, 10]]
+# # bins = [[0, 1, 2, 3, 4, 6, 9, 26]]
+# bins = [[0, 1, 2, 3, 4, 6, 26]]
+
+# labels = [False]
+# for v, b, l in zip(variables, bins, labels):
+#     print(v)
+#     print(b)
+#     print(l)
+#     # col_label = v + '_c'
+#     # data[col_label] = pd.cut(data[v],
+#     #                          bins=b,
+#     #                          labels=l,
+#     #                          include_lowest=True).astype(float)
+
+# out = pd.cut(data[v],
+#              bins=b,
+#              labels=l,
+#              include_lowest=True).astype(float)
+# out.unique()
+# out.value_counts()
+
+
+# import statsmodels.api as sm
+
+# y=ntmle.df_restricted_list[-1][ntmle.outcome]
+# q_init=ntmle._Qinit_DL_
+# ipw=ntmle.h_iptw
+# verbose=False
+
+# (q_init <= 0.005).sum()
+# (q_init <= 0.995).sum()
+
+# ipw[q_init <= 0.005].mean()
+# ipw[q_init >= 0.995].mean()
+
+# # ntmle._Qinit_.min()
+# # ntmle._Qinit_.max()
+# # q_init = ntmle._Qinit_
+# q_init = np.clip(q_init, 0.2, 0.85)
+# q_init
+# # ipw
+
+# np.log(probability_to_odds(0.05))
+# np.log(probability_to_odds(0.95))
+# np.exp(6)
+
+
+# f = sm.families.family.Binomial()
+# log = sm.GLM(y,  # Outcome / dependent variable
+#              np.repeat(1, y.shape[0]),  # Generating intercept only model
+#              offset=np.log(probability_to_odds(q_init)),  # Offset by g-formula predictions
+#              freq_weights=ipw,  # Weighted by calculated IPW
+#              family=f).fit(maxiter=500)
+
+# epsilon = log.params[0]
+# epsilon = -0.33
+# print(f'epsilon: {epsilon}')
+
+# np.exp(0)
+# q_star = (ntmle.y_star * np.exp(epsilon)) / (1 - ntmle.y_star + ntmle.y_star * np.exp(epsilon))
+# ntmle.pooled_data_restricted_list[-1]['__pred_q_star__'] = q_star 
+# marginals_vector = np.asarray(ntmle.pooled_data_restricted_list[-1].groupby('_sample_id_')['__pred_q_star__'].mean())
+# marginal_outcome = np.mean(marginals_vector) 
+# print(f'marginal_outcome: {marginal_outcome}')
+# bias = marginal_outcome - truth[p]
+# print(f'bias: {bias}')
+
+# log.params
+# log.summary()
+
+# TEST END
+
+
 
 
 ########################################
@@ -410,15 +625,16 @@ for p in prop_treated:
 
 print("===========================")
 avg_df = pd.DataFrame.from_dict(avg_over_sims, orient='index')
+# parallel_id
 if use_deep_learner_outcome:
-    avg_df.to_csv("../avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + ".csv", index=False)
+    avg_df.to_csv("../avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + "_" + str(parallel_id) + ".csv", index=False)
 else:
-    avg_df.to_csv("../avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", index=False)
+    avg_df.to_csv("../avg_sims_results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + "_" + str(parallel_id) + ".csv", index=False)
 
-########################################
+#######################################
 # Saving results
-########################################
+#######################################
 if use_deep_learner_outcome:
-    results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + ".csv", index=False)
+    results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_DL_" +  args.task_string + "_" + str(parallel_id) + ".csv", index=False)
 else:
-    results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + ".csv", index=False)
+    results.to_csv("../results/" + exposure + str(sim_id) + "_" + save + "_LR_" +  args.task_string + "_" + str(parallel_id) + ".csv", index=False)

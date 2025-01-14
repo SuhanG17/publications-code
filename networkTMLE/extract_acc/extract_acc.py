@@ -131,7 +131,7 @@ def extract_acc(filepath, num_sim=30, LR=True):
     # col: 19 p_{\omega} values
     # row: 30 simulations
     col_index = np.round(np.arange(0.05, 1, 0.05), 2)
-    row_index = np.arange(0, 30, 1)
+    row_index = np.arange(0, num_sim, 1)
     with open(filepath) as inp:
         data = list(inp) # or set(inp) if you really need a set
 
@@ -186,6 +186,36 @@ networktype = ['10010', '10020', '10030', '10040',
                '70010', '70020', '70030', '70040']
 save_path = '../results_csv/logfiles/output_csv/'
 
+
+latex_df_holder = []
+for network in networktype:
+    if '700' in network: # only 15 simulations for 700*0
+        num_sim = 15
+    else:
+        num_sim = 30
+
+    dir_path = '../results_csv/logfiles/input_logs/LR/'
+    if '0040' in network or '700' in network:
+        dir_path = '../results_csv/logfiles/input_logs/LR/rerun_to_get_pooled_acc/'
+    print(dir_path + network + '_training_outcome' + 'LR.log')
+    df_avg_std_LR, col_avg_std_LR, row_avg_std_LR = extract_acc(dir_path + network + '_training_outcome' + 'LR.log', num_sim=num_sim, LR=True)
+    df_avg_std_LR.to_csv(save_path + network + '_pooled_acc_' + 'LR.csv')
+    latex_df_LR = transform_col_avg_std(col_avg_std_LR, network_type=network+'LR')
+    latex_df_holder.append(latex_df_LR)
+
+    dir_path = '../results_csv/logfiles/input_logs/DL/'
+    if  '400' in network or '70040' in network:
+        dir_path = '../results_csv/logfiles/input_logs/DL/re-run/'
+    print(dir_path + network + '_training_outcome' + 'DL.log')
+    df_avg_std_DL, col_avg_std_DL, row_avg_std_DL = extract_acc(dir_path + network + '_training_outcome' + 'DL.log', num_sim=num_sim, LR=False)
+    df_avg_std_DL.to_csv(save_path + network + '_pooled_acc_' + 'DL.csv')
+    latex_df_DL = transform_col_avg_std(col_avg_std_DL, network_type=network+'DL')
+    latex_df_holder.append(latex_df_DL)
+
+latex_df_final = pd.concat(latex_df_holder, axis=0)
+latex_df_final.to_csv(save_path + 'latex_acc.csv')
+
+# exclude results for *0040 and 700*0
 latex_df_holder = []
 for network in networktype:
     if '0040' not in network and '700' not in network: # the acc for LR *0040 and 700*0 is not saved

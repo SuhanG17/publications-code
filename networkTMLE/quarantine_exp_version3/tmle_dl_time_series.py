@@ -804,14 +804,16 @@ class NetworkTMLETimeSeries:
                                 self.marginal_outcome + zalpha*np.sqrt(var_cond)]
 
             # Variance: direct and latent, conditional on W variance
-            for excluded_ids in self._exclude_ids_degree_:
-                # print(excluded_ids)
-                if excluded_ids is not None:
-                    # print(excluded_ids.shape)
-                    # print(f'adj shape: {self.adj_matrix_list[-1].shape[0]}, excluded_ids shape: {excluded_ids.shape[0]}, min_sample: {min_sample}')
-                    # print(self.adj_matrix_list[-1].shape[0] - excluded_ids.shape[0] == min_sample)
-                    if self.adj_matrix_list[-1].shape[0] - excluded_ids.shape[0] == min_sample:
-                        excluded_ids_for_sample_matching = excluded_ids
+            excluded_ids_for_sample_matching = None
+            if self._exclude_ids_degree_ is not None:
+                for excluded_ids in self._exclude_ids_degree_:
+                    # print(excluded_ids)
+                    if excluded_ids is not None:
+                        # print(excluded_ids.shape)
+                        # print(f'adj shape: {self.adj_matrix_list[-1].shape[0]}, excluded_ids shape: {excluded_ids.shape[0]}, min_sample: {min_sample}')
+                        # print(self.adj_matrix_list[-1].shape[0] - excluded_ids.shape[0] == min_sample)
+                        if self.adj_matrix_list[-1].shape[0] - excluded_ids.shape[0] == min_sample:
+                            excluded_ids_for_sample_matching = excluded_ids
 
             var_lcond = self._est_variance_latent_conditional_(iptw=h_iptw[:min_sample],                         # Estimate latent variance
                                                             obs_y=y_[:min_sample],                            # ... observed value of Y
